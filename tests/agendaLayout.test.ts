@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest'
 import type { NormalizedEvent } from '../src/types'
 import {
   agendaDominantDayKey,
+  agendaDominantDayKeyFromRects,
   agendaEventsForDay,
   agendaSegHeight,
+  agendaTopAnchorDayKey,
+  agendaVisibleDayKeys,
   sortAgendaDayEvents
 } from '../src/utils/agendaLayout'
 
@@ -59,5 +62,36 @@ describe('agendaLayout', () => {
     expect(agendaDominantDayKey(90, 300, segs)).toBe('2026-07-23')
     expect(agendaDominantDayKey(10, 300, segs)).toBe('2026-07-23')
     expect(agendaDominantDayKey(0, 60, segs)).toBe('2026-07-22')
+  })
+
+  it('picks dominant day from live layout rects', () => {
+    const segs = [
+      { dayKey: '2026-07-22', top: 100, bottom: 180 },
+      { dayKey: '2026-07-23', top: 180, bottom: 580 },
+      { dayKey: '2026-07-24', top: 580, bottom: 880 }
+    ]
+    expect(agendaDominantDayKeyFromRects(200, 500, segs)).toBe('2026-07-23')
+    expect(agendaDominantDayKeyFromRects(120, 200, segs)).toBe('2026-07-22')
+  })
+
+  it('top anchor follows sticky header, not largest visible block', () => {
+    const segs = [
+      { dayKey: '2026-07-22', top: 100, bottom: 900 },
+      { dayKey: '2026-07-23', top: 900, bottom: 1020 }
+    ]
+    // Day 23 occupies more pixels, but its header has not reached the top yet.
+    expect(agendaDominantDayKeyFromRects(880, 980, segs)).toBe('2026-07-23')
+    expect(agendaTopAnchorDayKey(880, segs)).toBe('2026-07-22')
+    expect(agendaTopAnchorDayKey(895, segs)).toBe('2026-07-23')
+  })
+
+  it('highlights every day with visible area in the viewport', () => {
+    const segs = [
+      { dayKey: '2026-07-22', top: 100, bottom: 900 },
+      { dayKey: '2026-07-23', top: 900, bottom: 1020 }
+    ]
+    expect(agendaVisibleDayKeys(880, 980, segs)).toEqual(['2026-07-22', '2026-07-23'])
+    expect(agendaVisibleDayKeys(910, 980, segs)).toEqual(['2026-07-23'])
+    expect(agendaVisibleDayKeys(50, 90, segs)).toEqual([])
   })
 })

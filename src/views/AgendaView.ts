@@ -5,7 +5,11 @@
 import type { LayoutPatch, NormalizedEvent, View, ViewContext } from '../types'
 import { addDays, dayKey, formatTime, startOfDay } from '../utils/date'
 import { escapeAttr, escapeHtml } from '../utils/dom'
-import { agendaEventsForDay, agendaDominantDayKey } from '../utils/agendaLayout'
+import {
+  agendaEventsForDay,
+  agendaTopAnchorDayKey,
+  agendaVisibleDayKeys
+} from '../utils/agendaLayout'
 import { indexEventsByDay } from '../utils/eventIndex'
 import { dateToDayIndex, dayIndexToDate } from '../utils/infiniteScroll'
 
@@ -22,6 +26,7 @@ export class AgendaView implements View {
   private ctx: ViewContext | null = null
   private byDay = new Map<string, NormalizedEvent[]>()
   private lastAnchorKey = ''
+  private lastVisibleKeys = new Set<string>()
   private mountedStart = 0
   private mountedEnd = 0
   private scrollRaf = 0
@@ -59,8 +64,12 @@ export class AgendaView implements View {
   }
 
   syncEvents(events: NormalizedEvent[]): void {
-    this.indexEvents(events)
+    const anchor = this.captureScrollAnchor()
+    this.mergeEvents(events)
     this.refreshMountedSegments()
+    void this.stripEl?.offsetHeight
+    this.restoreScrollAnchor(anchor)
+    this.updateAnchorFromScroll()
   }
 
   goToDate(date: Date): void {
@@ -86,6 +95,31 @@ export class AgendaView implements View {
 
   private indexEvents(events: NormalizedEvent[]): void {
     this.byDay = indexEventsByDay(events)
+  }
+
+  /** Merge fetched events — keep mounted days consistent while range catches up. */
+  private mergeEvents(events: NormalizedEvent[]): void {
+    const incoming = indexEventsByDay(events)
+    if (!this.stripEl) {
+      this.byDay = incoming
+      return
+    }
+    const next = new Map(this.byDay)
+    for (const [key, list] of incoming) next.set(key, list)
+    this.stripEl.querySelectorAll<HTMLElement>('.rde-agenda-seg[data-day]').forEach((seg) => {
+      const key = seg.dataset.day
+      if (!key) return
+      if (incoming.has(key)) next.set(key, incoming.get(key)!)
+      else if (!next.has(key)) next.set(key, [])
+    })
+    this.byDay = next
+  }
+
+  private ensureDayKeys(from: number, to: number): void {
+    for (let i = from; i <= to; i++) {
+      const key = dayKey(dayIndexToDate(i))
+      if (!this.byDay.has(key)) this.byDay.set(key, [])
+    }
   }
 
   private clampIndex(index: number): number {
@@ -163,6 +197,7 @@ export class AgendaView implements View {
 
   private prependDays(from: number, to: number): void {
     if (!this.stripEl || to < from) return
+    this.ensureDayKeys(from, to)
     const html = Array.from({ length: to - from + 1 }, (_, i) => this.daySegHtml(from + i)).join('')
     const vp = this.viewportEl
     const prevHeight = this.stripEl.scrollHeight
@@ -173,6 +208,7 @@ export class AgendaView implements View {
 
   private appendDays(from: number, to: number): void {
     if (!this.stripEl || to < from) return
+    this.ensureDayKeys(from, to)
     const html = Array.from({ length: to - from + 1 }, (_, i) => this.daySegHtml(from + i)).join('')
     this.stripEl.insertAdjacentHTML('beforeend', html)
     this.mountedEnd = to
@@ -180,12 +216,9 @@ export class AgendaView implements View {
 
   private trimStart(n: number): void {
     if (!this.stripEl || !this.viewportEl || n <= 0) return
-    for (let i = 0; i < n; i++) {
-      const first = this.stripEl.firstElementChild as HTMLElement | null
-      if (!first) break
-      this.viewportEl.scrollTop -= first.offsetHeight
-      first.remove()
-    }
+    const prevHeight = this.stripEl.scrollHeight
+    for (let i = 0; i < n; i++) this.stripEl.firstElementChild?.remove()
+    this.viewportEl.scrollTop -= prevHeight - this.stripEl.scrollHeight
     this.mountedStart += n
   }
 
@@ -211,7 +244,10 @@ export class AgendaView implements View {
     if (!this.viewportEl || !this.stripEl) return
     const seg = this.stripEl.querySelector<HTMLElement>(`[data-day-index="${index}"]`)
     if (!seg) return
-    this.viewportEl.scrollTo({ top: seg.offsetTop, behavior })
+    const vpRect = this.viewportEl.getBoundingClientRect()
+    const segRect = seg.getBoundingClientRect()
+    const top = this.viewportEl.scrollTop + (segRect.top - vpRect.top)
+    this.viewportEl.scrollTo({ top, behavior })
   }
 
   private onScroll = (): void => {
@@ -228,6 +264,7 @@ export class AgendaView implements View {
     const { scrollTop, clientHeight, scrollHeight } = this.viewportEl
     const min = this.ctx.minDayIndex
     const max = this.ctx.maxDayIndex
+    const anchor = this.captureScrollAnchor()
 
     if (scrollTop < EDGE_PX && this.mountedStart > (min ?? -Infinity)) {
       this.extending = true
@@ -253,31 +290,74 @@ export class AgendaView implements View {
       }
       this.extending = false
     }
+
+    void this.stripEl?.offsetHeight
+    this.restoreScrollAnchor(anchor)
   }
 
   private applyAgendaHighlight(): void {
-    if (!this.stripEl || !this.lastAnchorKey) return
-    const key = this.lastAnchorKey
+    if (!this.stripEl) return
+    const active = this.lastVisibleKeys
     this.stripEl.querySelectorAll<HTMLElement>('.rde-agenda-seg[data-day]').forEach((seg) => {
-      seg.classList.toggle('is-active', seg.dataset.day === key)
+      seg.classList.toggle('is-active', active.has(seg.dataset.day ?? ''))
     })
+  }
+
+  private segmentLayoutRects(): Array<{ dayKey: string; top: number; bottom: number }> {
+    if (!this.stripEl) return []
+    const segs = this.stripEl.querySelectorAll<HTMLElement>('.rde-agenda-seg[data-day]')
+    return Array.from(segs)
+      .map((seg) => {
+        const r = seg.getBoundingClientRect()
+        return {
+          dayKey: seg.dataset.day ?? '',
+          top: r.top,
+          bottom: r.bottom
+        }
+      })
+      .filter((seg) => seg.dayKey)
+  }
+
+  private captureScrollAnchor(): { dayKey: string; contentTop: number } | null {
+    if (!this.viewportEl) return null
+    const vpRect = this.viewportEl.getBoundingClientRect()
+    const anchorKey = agendaTopAnchorDayKey(vpRect.top, this.segmentLayoutRects())
+    if (!anchorKey) return null
+    const seg = this.stripEl?.querySelector<HTMLElement>(`.rde-agenda-seg[data-day="${anchorKey}"]`)
+    if (!seg) return null
+    const segRect = seg.getBoundingClientRect()
+    return {
+      dayKey: anchorKey,
+      contentTop: this.viewportEl.scrollTop + (segRect.top - vpRect.top)
+    }
+  }
+
+  private restoreScrollAnchor(anchor: { dayKey: string; contentTop: number } | null): void {
+    if (!anchor || !this.viewportEl || !this.stripEl) return
+    const seg = this.stripEl.querySelector<HTMLElement>(`.rde-agenda-seg[data-day="${anchor.dayKey}"]`)
+    if (!seg) return
+    const vpRect = this.viewportEl.getBoundingClientRect()
+    const segRect = seg.getBoundingClientRect()
+    const currentTop = this.viewportEl.scrollTop + (segRect.top - vpRect.top)
+    const delta = anchor.contentTop - currentTop
+    if (Math.abs(delta) > 0.5) this.viewportEl.scrollTop += delta
   }
 
   private updateAnchorFromScroll(): void {
     if (!this.viewportEl || !this.ctx) return
-    const { scrollTop, clientHeight } = this.viewportEl
-    const segs = this.stripEl?.querySelectorAll<HTMLElement>('.rde-agenda-seg') ?? []
-    const rects = Array.from(segs).map((seg) => ({
-      dayKey: seg.dataset.day ?? '',
-      offsetTop: seg.offsetTop,
-      height: seg.offsetHeight
-    }))
-    const anchorKey = agendaDominantDayKey(scrollTop, clientHeight, rects)
-    if (anchorKey && anchorKey !== this.lastAnchorKey) {
-      this.lastAnchorKey = anchorKey
-      const [y, m, d] = anchorKey.split('-').map(Number)
+    const vpRect = this.viewportEl.getBoundingClientRect()
+    const rects = this.segmentLayoutRects()
+
+    const titleKey = agendaTopAnchorDayKey(vpRect.top, rects)
+    if (titleKey && titleKey !== this.lastAnchorKey) {
+      this.lastAnchorKey = titleKey
+      const [y, m, d] = titleKey.split('-').map(Number)
       this.ctx.onAnchorChange(startOfDay(new Date(y, m - 1, d)))
     }
+
+    let visibleKeys = agendaVisibleDayKeys(vpRect.top, vpRect.bottom, rects)
+    if (!visibleKeys.length && titleKey) visibleKeys = [titleKey]
+    this.lastVisibleKeys = new Set(visibleKeys)
     this.applyAgendaHighlight()
   }
 

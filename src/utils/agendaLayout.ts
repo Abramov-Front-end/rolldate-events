@@ -74,3 +74,64 @@ export function agendaDominantDayKey(
   }
   return bestKey
 }
+
+/** Same as agendaDominantDayKey but uses live layout rects (stable after DOM churn). */
+export function agendaDominantDayKeyFromRects(
+  viewportTop: number,
+  viewportBottom: number,
+  segments: Array<{ dayKey: string; top: number; bottom: number }>
+): string {
+  if (!segments.length) return ''
+  let bestKey = segments[0].dayKey
+  let bestVisible = -1
+  for (const seg of segments) {
+    const visible = Math.max(
+      0,
+      Math.min(seg.bottom, viewportBottom) - Math.max(seg.top, viewportTop)
+    )
+    if (visible > bestVisible) {
+      bestVisible = visible
+      bestKey = seg.dayKey
+    }
+  }
+  return bestKey
+}
+
+const TOP_ANCHOR_SLACK_PX = 12
+
+/**
+ * Agenda title — last day whose header has reached the viewport top
+ * (sticky-header behaviour; avoids picking a tall previous day still in view).
+ */
+export function agendaTopAnchorDayKey(
+  viewportTop: number,
+  segments: Array<{ dayKey: string; top: number; bottom: number }>
+): string {
+  if (!segments.length) return ''
+  const sorted = segments.slice().sort((a, b) => a.top - b.top)
+  if (sorted[0].top > viewportTop + TOP_ANCHOR_SLACK_PX) return sorted[0].dayKey
+  let anchor = sorted[0].dayKey
+  for (const seg of sorted) {
+    if (seg.top <= viewportTop + TOP_ANCHOR_SLACK_PX) anchor = seg.dayKey
+    else break
+  }
+  return anchor
+}
+
+/** Day keys with meaningful visible area inside the agenda viewport. */
+export function agendaVisibleDayKeys(
+  viewportTop: number,
+  viewportBottom: number,
+  segments: Array<{ dayKey: string; top: number; bottom: number }>,
+  minVisiblePx = 20
+): string[] {
+  const keys: string[] = []
+  for (const seg of segments) {
+    const visible = Math.max(
+      0,
+      Math.min(seg.bottom, viewportBottom) - Math.max(seg.top, viewportTop)
+    )
+    if (visible >= minVisiblePx) keys.push(seg.dayKey)
+  }
+  return keys
+}

@@ -261,7 +261,8 @@ export class RollDateEvents {
 
   /** Prefetch beyond the mounted buffer so inserts already have events */
   private paddedRange(range: VisibleRange): VisibleRange {
-    const pad = this.viewName === 'month' ? 28 : this.viewName === 'week' ? 21 : 7
+    const pad =
+      this.viewName === 'month' ? 28 : this.viewName === 'week' ? 21 : this.viewName === 'agenda' ? 35 : 7
     return { from: addDays(range.from, -pad), to: addDays(range.to, pad) }
   }
 
