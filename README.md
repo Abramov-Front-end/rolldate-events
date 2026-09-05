@@ -150,9 +150,25 @@ Targets modern evergreen browsers with ES modules, CSS custom properties, and `R
 
 ## Beta status
 
-`0.1.0-beta.0` is an early public beta. APIs may change before `1.0.0`.
+`0.1.0-beta.2` is an early public beta. APIs may change before `1.0.0`.
 
 Please report issues at [github.com/Abramov-Front-end/rolldate-events/issues](https://github.com/Abramov-Front-end/rolldate-events/issues).
+
+## Changelog
+
+### 0.1.0-beta.2
+
+- **Month view:** prefetch event range when the visible month changes (fixes delayed data loading while scrolling months)
+- **Agenda view:** scroll anchoring when extending the date window; highlight days visible in the viewport
+- **Demo:** sliding-window synthetic data regenerates earlier when navigating far from the initial date range
+
+### 0.1.0-beta.1
+
+- Agenda scroll and highlight fixes
+
+### 0.1.0-beta.0
+
+- Initial Free public beta
 
 ## License
 

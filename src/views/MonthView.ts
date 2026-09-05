@@ -344,6 +344,16 @@ export class MonthView implements View {
     this.anchorMonth = m
     this.ctx.onAnchorChange(monthStart)
     this.applyMonthHighlight()
+    this.emitVisibleMonthRange(monthStart)
+  }
+
+  /** Prefetch events around the visible month (buffer range alone may not shift while scrolling). */
+  private emitVisibleMonthRange(monthStart: Date): void {
+    if (!this.ctx) return
+    const anchor = startOfMonth(monthStart)
+    const from = addDays(anchor, -42)
+    const to = addDays(anchor, 74)
+    this.ctx.onRangeChange({ from, to })
   }
 
   private emitRange(startIndex: number, count: number): void {
