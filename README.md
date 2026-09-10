@@ -1,15 +1,18 @@
 # RollDate Events
 
-High-performance JavaScript event calendar with continuous Month, Week, Day, and Agenda views. Part of the [RollDate](https://rolldate.dev/) ecosystem.
+High-performance JavaScript event calendar with Month, Week, Day, and Agenda views. Part of the [RollDate](https://rolldate.dev/) ecosystem.
 
-**Free public beta** · **MIT** · **TypeScript** · **ESM + CJS** · **zero runtime dependencies**
+**Free · MIT · TypeScript · ESM + CJS · zero runtime dependencies**
+
+- Website: [rolldate.dev/events](https://rolldate.dev/events)
+- Demo: [rolldate.dev/events/demo](https://rolldate.dev/events/demo)
+- Docs: [rolldate.dev/events/docs](https://rolldate.dev/events/docs)
+- GitHub: [github.com/Abramov-Front-end/rolldate-events](https://github.com/Abramov-Front-end/rolldate-events)
 
 ## Installation
 
-This is an early beta. Install from the npm `beta` dist-tag:
-
 ```bash
-npm install @rolldate/events@beta
+npm install @rolldate/events
 ```
 
 Styles are shipped separately:
@@ -39,6 +42,7 @@ const calendar = new RollDateEvents('#calendar', {
 })
 
 calendar.setView('week')
+calendar.setDate(new Date(2027, 3, 1)) // April 2027 — same as the date navigator
 calendar.today()
 ```
 
@@ -51,11 +55,11 @@ interface Event {
   start: Date | string
   end: Date | string
   allDay?: boolean
-  color?: string          // hex or CSS color
+  color?: string
   location?: string
   description?: string
-  resourceId?: string     // reserved for future Resource Timeline (not grouped in Free)
-  recurring?: EventRecurring // Pro-only expansion; Free renders the base occurrence only
+  resourceId?: string     // reserved — not used by views in v1
+  recurring?: EventRecurring // reserved — base occurrence only in v1
 }
 ```
 
@@ -68,8 +72,8 @@ interface Event {
 | `color` | Left accent / chip color |
 | `location` | Optional location label |
 | `description` | Optional description (not shown in all views) |
-| `resourceId` | Reserved API field — **not used** by Free views today |
-| `recurring` | Reserved API field — **not expanded** in the Free build |
+| `resourceId` | Reserved for future functionality — **not grouped** in v1 |
+| `recurring` | Reserved — **not expanded** in v1 |
 
 ## Views
 
@@ -78,9 +82,18 @@ interface Event {
 | **Month** | Continuous vertical week strip; timed chips or compact dots when narrow |
 | **Week** | Horizontal week strip with timed grid and all-day band |
 | **Day** | Single-day timed grid with vertical day navigation |
-| **Agenda** | Native scroll list of full event rows grouped by date |
+| **Agenda** | Native scroll list of full event rows grouped by date (no “+N more”) |
 
 All views use buffered `translate3d` strips or native scroll so navigation stays smooth with large datasets.
+
+## Navigation
+
+- **Toolbar:** Previous, Today, Next
+- **Keyboard:** Arrow Left / Right on the calendar root
+- **Date navigator:** Click the header period (`August 2026 ▾`) to pick month and year directly
+- **Programmatic:** `setDate(...)`, `today()`, `prev()`, `next()`, `setView(...)`
+
+Navigation respects `minDate` and `maxDate`. `setDate(...)` and the date navigator stay synchronized.
 
 ## Options
 
@@ -91,14 +104,12 @@ interface RollDateEventsOptions {
   defaultDate?: Date | string
   locale?: string                    // default: 'en'
   firstDayOfWeek?: 0 | 1             // 0 = Sunday, 1 = Monday (default)
-  theme?: 'light' | 'dark' | 'auto'  // default: 'dark'
-  header?: boolean                   // default: true (nav + title + view tabs)
+  theme?: 'light' | 'dark' | 'auto'  // default: 'dark'; auto reads system theme at init
+  header?: boolean                   // default: true (nav + date navigator + view tabs)
   visibleHours?: { start: number; end: number }  // week/day grid, default 9–18
   eventLimit?: number                // month chips before "+N more", default 3
   minDate?: Date | string            // inclusive navigation bound
   maxDate?: Date | string            // inclusive navigation bound
-  licenseKey?: string                // ignored in Free build
-  licenseApiUrl?: string             // ignored in Free build
   onEventClick?: (event: Event, nativeEvent: MouseEvent) => void
   onDateClick?: (date: Date, nativeEvent: MouseEvent) => void
   onViewChange?: (view: CalendarViewName) => void
@@ -111,18 +122,20 @@ interface RollDateEventsOptions {
 | Method | Description |
 |--------|-------------|
 | `setView(view)` | Switch Month / Week / Day / Agenda |
+| `getView()` | Current view name |
 | `setDate(date)` | Jump to a date in the current view |
+| `getDate()` | Current cursor date (local start-of-day) |
 | `setEvents(events)` | Replace all events |
 | `getEvents()` | Return raw event array |
 | `addEvent(event)` | Add one event |
 | `updateEvent(id, patch)` | Patch an event by id |
 | `removeEvent(id)` | Remove by id |
-| `today()` | Go to today (respects `minDate` / `maxDate`) |
+| `today()` | Go to today (respects bounds) |
 | `next()` | Next month / week / day / agenda step |
 | `prev()` | Previous step |
 | `destroy()` | Remove DOM and listeners |
 
-Read-only: `currentView`, `currentDate`, `el`.
+Read-only getters: `currentView`, `currentDate`, `el` (equivalent to `getView()` / `getDate()`).
 
 ## Callbacks
 
@@ -135,40 +148,43 @@ Read-only: `currentView`, `currentDate`, `el`.
 
 Layout adapts to the **calendar container width** (not just the browser viewport):
 
-- **≤640px (compact):** Month uses colored dots + `+N`; Week uses readable fixed day columns with horizontal pan; Day and Agenda use dense full-width layouts
-- **Agenda:** lists all events for mounted days (no “+N more” truncation)
+- **≤640px (compact):** Month uses colored dots + `+N`; Week uses readable fixed day columns; Day and Agenda use dense full-width layouts
+- **Date navigator:** usable at 320px container width
 
-Requires **`ResizeObserver`** for live reflow when the container is resized. If unavailable, the initial width is used without ongoing resize updates.
+Requires **`ResizeObserver`** for live reflow when the container is resized.
+
+## Date and time semantics
+
+RollDate Events uses **native JavaScript `Date` in the local timezone**. There is no built-in IANA timezone conversion in v1. Pass `Date` instances or local ISO strings; all-day events use calendar-day boundaries in local time.
+
+## Accessibility
+
+- Semantic buttons and tablist for view switching
+- Keyboard-operable toolbar and date navigator
+- Visible `:focus-visible` outlines
+- Unique IDs per calendar instance
+- `destroy()` removes listeners and mounted UI
+
+## Limitations (v1)
+
+Not included in v1:
+
+- Drag-and-drop or resize editing
+- Resource timeline / scheduler
+- Recurring-event expansion
+- Timezone conversion engine
 
 ## Large datasets
 
 Events are indexed by day. Views mount a bounded buffer of segments and call `onVisibleRangeChange` so you can load or filter data for relevant ranges. Event updates use `syncEvents` where possible to avoid resetting scroll position.
 
-## Browser notes
+## Browser support
 
-Targets modern evergreen browsers with ES modules, CSS custom properties, and `ResizeObserver`. No polyfills are bundled.
-
-## Beta status
-
-`0.1.0-beta.2` is an early public beta. APIs may change before `1.0.0`.
-
-Please report issues at [github.com/Abramov-Front-end/rolldate-events/issues](https://github.com/Abramov-Front-end/rolldate-events/issues).
+Modern evergreen browsers with ES modules, CSS custom properties, and `ResizeObserver`. No polyfills are bundled.
 
 ## Changelog
 
-### 0.1.0-beta.2
-
-- **Month view:** prefetch event range when the visible month changes (fixes delayed data loading while scrolling months)
-- **Agenda view:** scroll anchoring when extending the date window; highlight days visible in the viewport
-- **Demo:** sliding-window synthetic data regenerates earlier when navigating far from the initial date range
-
-### 0.1.0-beta.1
-
-- Agenda scroll and highlight fixes
-
-### 0.1.0-beta.0
-
-- Initial Free public beta
+See [CHANGELOG.md](./CHANGELOG.md).
 
 ## License
 

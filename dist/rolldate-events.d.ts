@@ -5,7 +5,7 @@
 type CalendarViewName = 'month' | 'week' | 'day' | 'agenda';
 type ThemeMode = 'light' | 'dark' | 'auto';
 type RecurrenceFrequency = 'daily' | 'weekly' | 'monthly' | 'yearly';
-/** Recurring rule — Pro only (ignored / stripped in Lite builds) */
+/** Recurring rule — reserved for future use; not expanded in v1 */
 interface EventRecurring {
     frequency: RecurrenceFrequency;
     /** Every N periods (default 1) */
@@ -33,7 +33,7 @@ interface Event {
      * Month/Week/Day/Agenda do not group by this yet — keep the field for API stability.
      */
     resourceId?: string;
-    /** Pro feature — expanded at render time when license is active */
+    /** Reserved — not expanded in v1; base occurrence is rendered only */
     recurring?: EventRecurring;
 }
 /** @deprecated Use Event — kept as alias for clarity in docs */
@@ -66,11 +66,10 @@ interface RollDateEventsOptions {
     /** Latest navigable date (inclusive, by calendar day) */
     maxDate?: Date | string;
     /**
-     * Pro license key. Validated via API when using Pro build.
-     * Lite build ignores this.
+     * @deprecated Ignored in @rolldate/events v1. Reserved for internal builds.
      */
     licenseKey?: string;
-    /** Override license validation endpoint (Pro) */
+    /** @deprecated Ignored in @rolldate/events v1. */
     licenseApiUrl?: string;
     onEventClick?: (event: Event, nativeEvent: MouseEvent) => void;
     onDateClick?: (date: Date, nativeEvent: MouseEvent) => void;
@@ -162,7 +161,8 @@ declare class RollDateEvents {
     private cursor;
     private root;
     private bodyEl;
-    private titleEl;
+    private titleHost;
+    private dateNavigator;
     private activeView;
     private views;
     private proUnlocked;
@@ -175,8 +175,12 @@ declare class RollDateEvents {
     constructor(selector: string | HTMLElement, options?: RollDateEventsOptions);
     /** Current view name */
     get currentView(): CalendarViewName;
+    /** Alias for {@link currentView} */
+    getView(): CalendarViewName;
     /** Cursor date (local start-of-day) */
     get currentDate(): Date;
+    /** Alias for {@link currentDate} */
+    getDate(): Date;
     /** Switch Month / Week / Day / Agenda */
     setView(view: CalendarViewName): void;
     /** Jump to a date (keeps current view + scroll surface when possible) */
@@ -203,6 +207,8 @@ declare class RollDateEvents {
     private bufferedRange;
     private rangeRaf;
     private rangeSyncToken;
+    private emittedFrom;
+    private emittedTo;
     private refreshEvents;
     /** Prefetch beyond the mounted buffer so inserts already have events */
     private paddedRange;
@@ -221,13 +227,5 @@ declare class RollDateEvents {
     private render;
 }
 
-/**
- * Feature flags — `false` replaced at build time.
- */
-type FeatureName = 'recurring' | 'dragDrop' | 'resourceTimeline';
-/** True only in the Pro bundle */
-declare function isProBuild(): boolean;
-declare function isProFeature(name: FeatureName): boolean;
-
-export { RollDateEvents, isProBuild, isProFeature };
-export type { CalendarEvent, CalendarViewName as CalendarView, CalendarViewName, Event, EventRecurring, RollDateEventsOptions, ThemeMode, View, ViewContext, VisibleRange };
+export { RollDateEvents };
+export type { CalendarEvent, CalendarViewName as CalendarView, CalendarViewName, Event, EventRecurring, NormalizedEvent, RollDateEventsOptions, ThemeMode, View, ViewContext, VisibleRange };

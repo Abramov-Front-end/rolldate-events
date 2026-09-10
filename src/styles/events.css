@@ -84,20 +84,122 @@
   font-size: 13px;
 }
 
-.rde-title {
+.rde-title-wrap {
+  position: relative;
   flex: 1 1 auto;
-  margin: 0;
-  font-size: 16px;
-  font-weight: 650;
-  text-align: center;
+  display: flex;
+  justify-content: center;
   min-width: 140px;
 }
 
-.rde[data-compact='true'] .rde-title {
+.rde[data-compact='true'] .rde-title-wrap {
   order: -1;
-  text-align: left;
-  font-size: 15px;
+  justify-content: flex-start;
   min-width: 0;
+}
+
+.rde-date-nav-trigger {
+  margin: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--rde-text);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 650;
+  padding: 4px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: center;
+  max-width: 100%;
+}
+
+.rde[data-compact='true'] .rde-date-nav-trigger {
+  font-size: 15px;
+  text-align: left;
+}
+
+.rde-date-nav-trigger:hover {
+  background: var(--rde-hover);
+  border-color: var(--rde-border);
+}
+
+.rde-date-nav-trigger:focus-visible {
+  outline: 2px solid var(--rde-accent);
+  outline-offset: 2px;
+}
+
+.rde-date-nav-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  width: min(280px, calc(100vw - 24px));
+  max-width: 100%;
+  padding: 10px;
+  border: 1px solid var(--rde-border);
+  border-radius: var(--rde-radius);
+  background: var(--rde-bg);
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 28%, transparent);
+}
+
+.rde[data-compact='true'] .rde-date-nav-popover {
+  left: 0;
+  transform: none;
+  width: min(280px, 100%);
+}
+
+.rde-date-nav-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.rde-date-nav-year {
+  flex: 1;
+  text-align: center;
+  font-weight: 650;
+  font-size: 14px;
+}
+
+.rde-date-nav-year-btn {
+  min-width: 36px;
+  padding: 4px 8px;
+}
+
+.rde-date-nav-months {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.rde-date-nav-month {
+  min-height: 36px;
+  padding: 6px 4px;
+  font-size: 12px;
+}
+
+.rde-date-nav-month.is-current {
+  background: color-mix(in srgb, var(--rde-accent) 22%, var(--rde-surface));
+  border-color: var(--rde-accent);
+}
+
+.rde-date-nav-month:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.rde-date-nav-today {
+  width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rde-date-nav-popover {
+    transition: none;
+  }
 }
 
 .rde-btn {

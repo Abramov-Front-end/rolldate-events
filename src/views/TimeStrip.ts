@@ -7,6 +7,7 @@
 import type { LayoutPatch, NormalizedEvent, ViewContext } from '../types'
 import { addDays, dayKey, formatTime, sameDay, startOfWeek } from '../utils/date'
 import { escapeAttr, escapeHtml } from '../utils/dom'
+import { eventsFingerprint, indexEventsByDay } from '../utils/eventIndex'
 import {
   dateToDayIndex,
   dateToWeekIndex,
@@ -137,7 +138,7 @@ export class TimeStripController {
     this.host = ctx.root
     this.events = ctx.events
     this.indexEvents(ctx.events)
-    this.eventsFp = this.fingerprint(ctx.events)
+    this.eventsFp = eventsFingerprint(ctx.events)
     this.hoursH = hoursHeight(ctx)
     this.cols = this.mode === 'week' ? 7 : 1
     const horizontal = this.mode === 'week'
@@ -285,37 +286,17 @@ export class TimeStripController {
   }
 
   syncEvents(events: NormalizedEvent[]): void {
-    this.events = events
-    this.indexEvents(events)
-    const fp = this.fingerprint(events)
+    // Check first: scrolling inside a prefetched window re-delivers the same slice
+    const fp = eventsFingerprint(events)
     if (fp === this.eventsFp) return
     this.eventsFp = fp
+    this.events = events
+    this.indexEvents(events)
     this.fillEmptyDayBlocks()
   }
 
-  private fingerprint(events: NormalizedEvent[]): string {
-    if (!events.length) return '0'
-    const a = events[0]
-    const b = events[events.length - 1]
-    const m = events[events.length >> 1]
-    return `${events.length}:${String(a.id)}:${String(m.id)}:${String(b.id)}:${a.start.getTime()}:${b.end.getTime()}`
-  }
-
   private indexEvents(events: NormalizedEvent[]): void {
-    this.byDay = new Map()
-    for (const ev of events) {
-      let c = new Date(ev.start.getFullYear(), ev.start.getMonth(), ev.start.getDate())
-      const last = new Date(ev.end.getFullYear(), ev.end.getMonth(), ev.end.getDate())
-      let g = 0
-      while (c <= last && g < 60) {
-        const k = dayKey(c)
-        const list = this.byDay.get(k) || []
-        list.push(ev)
-        this.byDay.set(k, list)
-        c = addDays(c, 1)
-        g++
-      }
-    }
+    this.byDay = indexEventsByDay(events)
   }
 
   goToDate(date: Date): void {

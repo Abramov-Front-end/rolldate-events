@@ -9,7 +9,7 @@ export type ThemeMode = 'light' | 'dark' | 'auto'
 
 export type RecurrenceFrequency = 'daily' | 'weekly' | 'monthly' | 'yearly'
 
-/** Recurring rule — Pro only (ignored / stripped in Lite builds) */
+/** Recurring rule — reserved for future use; not expanded in v1 */
 export interface EventRecurring {
   frequency: RecurrenceFrequency
   /** Every N periods (default 1) */
@@ -38,7 +38,7 @@ export interface Event {
    * Month/Week/Day/Agenda do not group by this yet — keep the field for API stability.
    */
   resourceId?: string
-  /** Pro feature — expanded at render time when license is active */
+  /** Reserved — not expanded in v1; base occurrence is rendered only */
   recurring?: EventRecurring
 }
 
@@ -78,11 +78,10 @@ export interface RollDateEventsOptions {
   maxDate?: Date | string
 
   /**
-   * Pro license key. Validated via API when using Pro build.
-   * Lite build ignores this.
+   * @deprecated Ignored in @rolldate/events v1. Reserved for internal builds.
    */
   licenseKey?: string
-  /** Override license validation endpoint (Pro) */
+  /** @deprecated Ignored in @rolldate/events v1. */
   licenseApiUrl?: string
 
   onEventClick?: (event: Event, nativeEvent: MouseEvent) => void

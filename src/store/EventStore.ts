@@ -5,6 +5,7 @@
 
 import type { Event, NormalizedEvent, VisibleRange } from '../types'
 import { addDays, dayKey, endOfDay, startOfDay, toDate } from '../utils/date'
+import { indexEventsByDay } from '../utils/eventIndex'
 import { normalizeEvent } from '../utils/validate'
 import { devWarn } from '../utils/devWarn'
 
@@ -19,6 +20,24 @@ export class EventStore {
   private cached: NormalizedEvent[] = []
   private byDay = new Map<string, NormalizedEvent[]>()
   private byId = new Map<string, NormalizedEvent>()
+
+  /** Bumped by every mutation — invalidates all derived structures below */
+  private version = 0
+
+  /** `cached` references sorted by start time; rebuilt lazily */
+  private sorted: NormalizedEvent[] = []
+  private sortedVersion = -1
+  /** Longest event duration — lower bound for the sorted range scan */
+  private maxSpanMs = 0
+
+  /** Last prepared slice, memoized while the request stays inside it */
+  private memoResult: NormalizedEvent[] = []
+  private memoFrom = 0
+  private memoTo = -1
+  private memoVersion = -1
+
+  /** byDay is only needed by forDay() — build it on demand */
+  private dayIndexStale = true
 
   setEvents(events: Event[]): void {
     this.raw = events.slice()
@@ -35,6 +54,7 @@ export class EventStore {
     const norm = this.toCached(normalizeEvent(event, seen))
     this.cached.push(norm)
     this.byId.set(String(norm.id), norm)
+    this.invalidate()
   }
 
   update(id: string | number, patch: Partial<Omit<Event, 'id'>>): boolean {
@@ -65,6 +85,13 @@ export class EventStore {
     return single
   }
 
+  /** Drop memo / sorted / day index without touching normalized events */
+  private invalidate(): void {
+    this.version++
+    this.memoVersion = -1
+    this.dayIndexStale = true
+  }
+
   private rebuildCache(): void {
     const seen = new Set<string>()
     let warnedRecurring = false
@@ -73,7 +100,7 @@ export class EventStore {
         warnedRecurring = true
         devWarn(
           'recurring-lite',
-          '[RollDateEvents Lite] recurring events require RollDate Events Pro. Rendering the base occurrence only.'
+          '[RollDateEvents] recurring events are not expanded in v1. Rendering the base occurrence only.'
         )
       }
       return this.toCached(normalizeEvent(e, seen))
@@ -82,6 +109,34 @@ export class EventStore {
     for (const ev of this.cached) {
       this.byId.set(String(ev.id), ev)
     }
+    this.invalidate()
+  }
+
+  /** Sort `cached` references by start once per mutation */
+  private ensureSorted(): void {
+    if (this.sortedVersion === this.version) return
+    this.sorted = this.cached
+      .slice()
+      .sort((a, b) => a.start.getTime() - b.start.getTime())
+    let span = 0
+    for (const ev of this.sorted) {
+      const d = ev.end.getTime() - ev.start.getTime()
+      if (d > span) span = d
+    }
+    this.maxSpanMs = span
+    this.sortedVersion = this.version
+  }
+
+  /** First index in `sorted` whose start is >= ms */
+  private lowerBound(ms: number): number {
+    let lo = 0
+    let hi = this.sorted.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (this.sorted[mid].start.getTime() < ms) lo = mid + 1
+      else hi = mid
+    }
+    return lo
   }
 
   async prepareRange(range: VisibleRange, expandRecurring: boolean): Promise<NormalizedEvent[]> {
@@ -106,18 +161,40 @@ export class EventStore {
       this.index(ev, out)
     }
 
+    this.dayIndexStale = false
     return out
   }
 
+  /**
+   * Events overlapping [from, to].
+   *
+   * Uses a start-sorted view plus the longest known duration as a lower bound,
+   * so cost scales with the number of visible events rather than the whole
+   * collection. Repeated requests inside the last prepared window reuse it —
+   * continuous scrolling asks for near-identical ranges every frame.
+   */
   prepareRangeSync(range: VisibleRange): NormalizedEvent[] {
-    this.byDay.clear()
-    const out: NormalizedEvent[] = []
     const from = range.from.getTime()
     const to = range.to.getTime()
-    for (const ev of this.cached) {
-      if (ev.end.getTime() < from || ev.start.getTime() > to) continue
-      this.index(ev, out)
+
+    if (this.memoVersion === this.version && from >= this.memoFrom && to <= this.memoTo) {
+      return this.memoResult
     }
+
+    this.ensureSorted()
+    const out: NormalizedEvent[] = []
+    for (let i = this.lowerBound(from - this.maxSpanMs); i < this.sorted.length; i++) {
+      const ev = this.sorted[i]
+      if (ev.start.getTime() > to) break
+      if (ev.end.getTime() < from) continue
+      out.push(ev)
+    }
+
+    this.memoResult = out
+    this.memoFrom = from
+    this.memoTo = to
+    this.memoVersion = this.version
+    this.dayIndexStale = true
     return out
   }
 
@@ -126,6 +203,10 @@ export class EventStore {
   }
 
   forDay(day: Date): NormalizedEvent[] {
+    if (this.dayIndexStale) {
+      this.byDay = indexEventsByDay(this.memoResult)
+      this.dayIndexStale = false
+    }
     return this.byDay.get(dayKey(day)) || []
   }
 

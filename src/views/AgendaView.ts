@@ -10,7 +10,7 @@ import {
   agendaTopAnchorDayKey,
   agendaVisibleDayKeys
 } from '../utils/agendaLayout'
-import { indexEventsByDay } from '../utils/eventIndex'
+import { eventsFingerprint, indexEventsByDay } from '../utils/eventIndex'
 import { dateToDayIndex, dayIndexToDate } from '../utils/infiniteScroll'
 
 const INITIAL_BEFORE = 14
@@ -25,6 +25,7 @@ export class AgendaView implements View {
   private stripEl: HTMLElement | null = null
   private ctx: ViewContext | null = null
   private byDay = new Map<string, NormalizedEvent[]>()
+  private eventsFp = ''
   private lastAnchorKey = ''
   private lastVisibleKeys = new Set<string>()
   private mountedStart = 0
@@ -37,6 +38,7 @@ export class AgendaView implements View {
     this.ctx = ctx
     this.host = ctx.root
     this.indexEvents(ctx.events)
+    this.eventsFp = eventsFingerprint(ctx.events)
 
     this.host.innerHTML = `
       <div class="rde-agenda rde-agenda--scroll">
@@ -64,6 +66,10 @@ export class AgendaView implements View {
   }
 
   syncEvents(events: NormalizedEvent[]): void {
+    // Check first: merging re-renders segments and forces a reflow below
+    const fp = eventsFingerprint(events)
+    if (fp === this.eventsFp) return
+    this.eventsFp = fp
     const anchor = this.captureScrollAnchor()
     this.mergeEvents(events)
     this.refreshMountedSegments()
@@ -247,7 +253,11 @@ export class AgendaView implements View {
     const vpRect = this.viewportEl.getBoundingClientRect()
     const segRect = seg.getBoundingClientRect()
     const top = this.viewportEl.scrollTop + (segRect.top - vpRect.top)
-    this.viewportEl.scrollTo({ top, behavior })
+    if (typeof this.viewportEl.scrollTo === 'function') {
+      this.viewportEl.scrollTo({ top, behavior })
+    } else {
+      this.viewportEl.scrollTop = top
+    }
   }
 
   private onScroll = (): void => {

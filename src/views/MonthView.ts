@@ -13,6 +13,7 @@ import {
   weekDays
 } from '../utils/date'
 import { escapeAttr, escapeHtml } from '../utils/dom'
+import { eventsFingerprint, indexEventsByDay } from '../utils/eventIndex'
 import {
   dateToWeekIndex,
   TranslateStrip,
@@ -39,7 +40,7 @@ export class MonthView implements View {
     this.ctx = ctx
     this.host = ctx.root
     this.indexEvents(ctx.events)
-    this.eventsFp = this.fingerprint(ctx.events)
+    this.eventsFp = eventsFingerprint(ctx.events)
     this.anchorYear = ctx.cursor.getFullYear()
     this.anchorMonth = ctx.cursor.getMonth()
 
@@ -107,10 +108,11 @@ export class MonthView implements View {
   }
 
   syncEvents(events: NormalizedEvent[]): void {
-    this.indexEvents(events)
-    const fp = this.fingerprint(events)
+    // Check first: scrolling inside a prefetched window re-delivers the same slice
+    const fp = eventsFingerprint(events)
     if (fp === this.eventsFp) return
     this.eventsFp = fp
+    this.indexEvents(events)
     this.refreshDayEvents()
   }
 
@@ -178,32 +180,8 @@ export class MonthView implements View {
     this.scroller.refreshBuffer()
   }
 
-  private fingerprint(events: NormalizedEvent[]): string {
-    if (!events.length) return '0'
-    const a = events[0]
-    const b = events[events.length - 1]
-    const m = events[events.length >> 1]
-    return `${events.length}:${String(a.id)}:${String(m.id)}:${String(b.id)}:${a.start.getTime()}:${b.end.getTime()}`
-  }
-
   private indexEvents(events: NormalizedEvent[]): void {
-    this.byDay = new Map()
-    for (const ev of events) {
-      let c = new Date(ev.start.getFullYear(), ev.start.getMonth(), ev.start.getDate())
-      const last = new Date(ev.end.getFullYear(), ev.end.getMonth(), ev.end.getDate())
-      let g = 0
-      while (c <= last && g < 60) {
-        const k = dayKey(c)
-        const list = this.byDay.get(k) || []
-        list.push(ev)
-        this.byDay.set(k, list)
-        c = addDays(c, 1)
-        g++
-      }
-    }
-    for (const list of this.byDay.values()) {
-      list.sort((a, b) => a.start.getTime() - b.start.getTime())
-    }
+    this.byDay = indexEventsByDay(events)
   }
 
   private dayEventsHtml(key: string): string {
@@ -338,12 +316,13 @@ export class MonthView implements View {
     const monthStart = primaryMonthForWeek(weekStart)
     const y = monthStart.getFullYear()
     const m = monthStart.getMonth()
-    if (y === this.anchorYear && m === this.anchorMonth) return
-
-    this.anchorYear = y
-    this.anchorMonth = m
-    this.ctx.onAnchorChange(monthStart)
-    this.applyMonthHighlight()
+    const monthChanged = y !== this.anchorYear || m !== this.anchorMonth
+    if (monthChanged) {
+      this.anchorYear = y
+      this.anchorMonth = m
+      this.ctx.onAnchorChange(monthStart)
+      this.applyMonthHighlight()
+    }
     this.emitVisibleMonthRange(monthStart)
   }
 

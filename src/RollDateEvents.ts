@@ -21,7 +21,6 @@ import {
   clampDate,
   clampHour,
   isDayInRange,
-  monthTitle,
   startOfDay,
   startOfMonth,
   startOfWeek,
@@ -34,6 +33,7 @@ import { MonthView } from './views/MonthView'
 import { WeekView } from './views/WeekView'
 import { DayView } from './views/DayView'
 import { AgendaView } from './views/AgendaView'
+import { DateNavigator } from './ui/DateNavigator'
 import './styles/events.css'
 
 const DEFAULT_HOURS = { start: 9, end: 18 }
@@ -48,7 +48,8 @@ export class RollDateEvents {
   private cursor: Date
   private root!: HTMLElement
   private bodyEl!: HTMLElement
-  private titleEl: HTMLElement | null = null
+  private titleHost: HTMLElement | null = null
+  private dateNavigator: DateNavigator | null = null
   private activeView: View | null = null
   private views: Record<CalendarViewName, View>
   private proUnlocked = false
@@ -95,8 +96,18 @@ export class RollDateEvents {
     return this.viewName
   }
 
+  /** Alias for {@link currentView} */
+  getView(): CalendarViewName {
+    return this.viewName
+  }
+
   /** Cursor date (local start-of-day) */
   get currentDate(): Date {
+    return new Date(this.cursor)
+  }
+
+  /** Alias for {@link currentDate} */
+  getDate(): Date {
     return new Date(this.cursor)
   }
 
@@ -105,6 +116,7 @@ export class RollDateEvents {
     if (this.viewName === view) return
     this.viewName = view
     this.bufferedRange = null
+    this.emittedTo = -1
     this.options.onViewChange?.(view)
     void this.render({ remount: true })
   }
@@ -168,6 +180,8 @@ export class RollDateEvents {
     this.layoutObs?.disconnect()
     this.layoutObs = null
     if (this.rangeRaf) cancelAnimationFrame(this.rangeRaf)
+    this.dateNavigator?.destroy()
+    this.dateNavigator = null
     this.activeView?.destroy()
     this.activeView = null
     this.root?.remove()
@@ -237,14 +251,14 @@ export class RollDateEvents {
   }
 
   private updateTitle(): void {
-    if (this.titleEl) {
-      this.titleEl.textContent = monthTitle(this.cursor, this.options.locale || 'en')
-    }
+    this.dateNavigator?.refresh()
   }
 
   private bufferedRange: VisibleRange | null = null
   private rangeRaf = 0
   private rangeSyncToken = 0
+  private emittedFrom = 0
+  private emittedTo = -1
 
   private async refreshEvents(): Promise<void> {
     const range = this.paddedRange(this.bufferedRange || this.visibleRange())
@@ -267,6 +281,13 @@ export class RollDateEvents {
   }
 
   private onViewRangeChange(range: VisibleRange): void {
+    // Views re-emit the same range on every settle — skip identical repeats
+    const from = range.from.getTime()
+    const to = range.to.getTime()
+    if (from === this.emittedFrom && to === this.emittedTo) return
+    this.emittedFrom = from
+    this.emittedTo = to
+
     this.bufferedRange = range
     this.options.onVisibleRangeChange?.(range)
     if (this.rangeRaf) cancelAnimationFrame(this.rangeRaf)
@@ -364,7 +385,7 @@ export class RollDateEvents {
             <button type="button" class="rde-btn" data-action="today">Today</button>
             <button type="button" class="rde-btn" data-action="next" aria-label="Next">›</button>
           </div>
-          <h2 class="rde-title"></h2>
+          <div class="rde-title-wrap"></div>
           <div class="rde-views" role="tablist" aria-label="Calendar views">
             <button type="button" role="tab" class="rde-btn rde-view" data-view="month" id="rde-${this.instanceId}-tab-month" aria-controls="${panelId}">Month</button>
             <button type="button" role="tab" class="rde-btn rde-view" data-view="week" id="rde-${this.instanceId}-tab-week" aria-controls="${panelId}">Week</button>
@@ -374,7 +395,19 @@ export class RollDateEvents {
         </div>
         <div class="rde-body" id="${panelId}" role="tabpanel" tabindex="-1"></div>
       `
-      this.titleEl = this.root.querySelector('.rde-title')
+      this.titleHost = this.root.querySelector('.rde-title-wrap')
+      if (this.titleHost) {
+        this.dateNavigator = new DateNavigator({
+          host: this.titleHost,
+          locale: this.options.locale || 'en',
+          instanceId: this.instanceId,
+          getCursor: () => this.cursor,
+          getMinDate: () => this.boundsMin(),
+          getMaxDate: () => this.boundsMax(),
+          onSelect: (year, month) => this.setDate(new Date(year, month, 1)),
+          onToday: () => this.today()
+        })
+      }
     } else {
       this.root.innerHTML = `<div class="rde-body"></div>`
     }
@@ -393,6 +426,8 @@ export class RollDateEvents {
     })
 
     this.root.addEventListener('keydown', (e) => {
+      // The open date navigator owns arrow keys while focus is inside it
+      if (this.dateNavigator?.ownsEventTarget(e.target)) return
       if (e.key === 'ArrowLeft') {
         e.preventDefault()
         this.prev()
@@ -480,6 +515,8 @@ export class RollDateEvents {
 
     const range = this.bufferedRange && !remount ? this.bufferedRange : this.visibleRange()
     if (remount) this.bufferedRange = range
+    this.emittedFrom = range.from.getTime()
+    this.emittedTo = range.to.getTime()
     this.options.onVisibleRangeChange?.(range)
 
     const expand = __PRO__ && this.proUnlocked

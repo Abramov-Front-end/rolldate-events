@@ -41,7 +41,7 @@ fs.writeFileSync(
 run(`npm install "${tgzAbs}"`, esmDir)
 fs.writeFileSync(
   path.join(esmDir, 'test.mjs'),
-  `import { RollDateEvents, isProBuild } from '@rolldate/events'
+  `import { RollDateEvents } from '@rolldate/events'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -53,7 +53,6 @@ const cssRel = pkgJson.exports['./styles']
 const cssFile = path.join(path.dirname(require.resolve('@rolldate/events/package.json')), cssRel.replace(/^\\.\\//, ''))
 
 assert.strictEqual(typeof RollDateEvents, 'function')
-assert.strictEqual(isProBuild(), false)
 assert.ok(fs.existsSync(cssFile), 'CSS file missing: ' + cssFile)
 console.log('ESM OK')
 `
@@ -70,10 +69,9 @@ fs.writeFileSync(
 run(`npm install "${tgzAbs}"`, cjsDir)
 fs.writeFileSync(
   path.join(cjsDir, 'test.cjs'),
-  `const { RollDateEvents, isProBuild } = require('@rolldate/events')
+  `const { RollDateEvents } = require('@rolldate/events')
 const assert = require('node:assert')
 assert.strictEqual(typeof RollDateEvents, 'function')
-assert.strictEqual(isProBuild(), false)
 console.log('CJS OK')
 `
 )

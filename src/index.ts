@@ -17,7 +17,7 @@ export type {
   VisibleRange
 } from './types'
 export type { CalendarViewName as CalendarView } from './types'
-export { isProBuild, isProFeature } from './features'
+export type { NormalizedEvent } from './types'
 
 if (typeof window !== 'undefined') {
   ;(window as unknown as { RollDateEvents: typeof RollDateEvents }).RollDateEvents =
