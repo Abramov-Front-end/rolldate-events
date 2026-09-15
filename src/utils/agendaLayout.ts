@@ -43,6 +43,33 @@ export function agendaEventsForDay(
   return sortAgendaDayEvents(byDay.get(key) || [])
 }
 
+/**
+ * Occupied agenda days in chronological order.
+ * Empty days are omitted — Agenda is an event list, not a day strip.
+ */
+export function occupiedDayKeys(
+  byDay: Map<string, NormalizedEvent[]>,
+  isAllowed: (key: string) => boolean = () => true
+): string[] {
+  const keys: string[] = []
+  for (const [key, list] of byDay) {
+    if (!list.length) continue
+    if (!isAllowed(key)) continue
+    keys.push(key)
+  }
+  keys.sort()
+  return keys
+}
+
+/** First occupied day on or after `targetKey`, else the last occupied day. */
+export function nearestOccupiedDayKey(keys: string[], targetKey: string): string | null {
+  if (!keys.length) return null
+  for (const key of keys) {
+    if (key >= targetKey) return key
+  }
+  return keys[keys.length - 1]
+}
+
 export interface AgendaSegRect {
   dayKey: string
   offsetTop: number

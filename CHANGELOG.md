@@ -2,6 +2,20 @@
 
 All notable changes to `@rolldate/events` are documented here.
 
+## [Unreleased]
+
+## [1.0.1] — 2026-09-15
+
+### Changed
+
+- **Agenda** — compact event list grouped by date; days without events are skipped
+
+### Fixed
+
+- **Date navigator** — previous/next year jumps to the current month of that year; the popover stays open until a month is chosen or the user clicks outside
+- **Public demo data** — the 100 / 1,000 / 5,000 counts stay inside a bounded window and no longer spawn events for every scrolled year
+- **Layout** — calendar height uses fixed pixels (no `vh`), and compact mode has hysteresis so the layout does not flicker at the breakpoint
+
 ## [1.0.0] — 2026-09-10
 
 First stable public release. RollDate Events is free and open-source under the

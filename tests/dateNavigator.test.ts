@@ -122,6 +122,35 @@ describe('Date navigator', () => {
     expect(document.activeElement).not.toBe(trigger)
   })
 
+  it('year buttons jump to the current month and keep the popover open', () => {
+    const cal = mount({ defaultDate: '2026-08-15' })
+    const trigger = document.querySelector('.rde-date-nav-trigger') as HTMLButtonElement
+    trigger.click()
+    const popover = document.querySelector('.rde-date-nav-popover') as HTMLElement
+    const nextYear = document.querySelector<HTMLButtonElement>('[data-action="next-year"]')
+    nextYear!.click()
+
+    expect(popover.hidden).toBe(false)
+    expect(cal.getDate().getFullYear()).toBe(2027)
+    expect(cal.getDate().getMonth()).toBe(7)
+    expect(document.querySelector('.rde-date-nav-year')?.textContent).toBe('2027')
+  })
+
+  it('month click still closes the navigator after a year jump', () => {
+    const cal = mount({ defaultDate: '2026-08-15' })
+    document.querySelector<HTMLButtonElement>('.rde-date-nav-trigger')!.click()
+    document.querySelector<HTMLButtonElement>('[data-action="prev-year"]')!.click()
+    expect(cal.getDate().getFullYear()).toBe(2025)
+
+    const march = [...document.querySelectorAll<HTMLButtonElement>('.rde-date-nav-month')].find(
+      (b) => b.textContent?.toLowerCase().startsWith('mar')
+    )
+    march!.click()
+    expect(document.querySelector('.rde-date-nav-popover')?.hidden).toBe(true)
+    expect(cal.getDate().getFullYear()).toBe(2025)
+    expect(cal.getDate().getMonth()).toBe(2)
+  })
+
   it('stays open when focus is lost to nothing (window blur)', () => {
     mount()
     const trigger = document.querySelector('.rde-date-nav-trigger') as HTMLButtonElement

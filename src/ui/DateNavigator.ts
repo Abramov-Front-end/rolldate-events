@@ -228,8 +228,21 @@ export class DateNavigator {
     if (max) next = Math.min(next, max.getFullYear())
     if (next === this.panelYear) return
     this.panelYear = next
+    const month = this.nearestEnabledMonth(this.panelYear, this.cfg.getCursor().getMonth())
     this.renderPanel()
+    if (month != null) this.cfg.onSelect(this.panelYear, month)
     this.monthsEl.querySelector<HTMLButtonElement>('[data-month]:not([disabled])')?.focus()
+  }
+
+  private nearestEnabledMonth(year: number, preferred: number): number | null {
+    if (!this.monthDisabled(year, preferred)) return preferred
+    for (let d = 1; d < 12; d++) {
+      const earlier = preferred - d
+      const later = preferred + d
+      if (earlier >= 0 && !this.monthDisabled(year, earlier)) return earlier
+      if (later <= 11 && !this.monthDisabled(year, later)) return later
+    }
+    return null
   }
 
   private monthDisabled(year: number, month: number): boolean {

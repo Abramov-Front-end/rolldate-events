@@ -125,6 +125,7 @@ export class TimeStripController {
   private allDayH = 0
   private cols = 1
   private resizeObs: ResizeObserver | null = null
+  private resizeRaf = 0
   private eventsFp = ''
   private timeScrollEl: HTMLElement | null = null
 
@@ -260,7 +261,11 @@ export class TimeStripController {
 
     if (horizontal && typeof ResizeObserver !== 'undefined') {
       this.resizeObs = new ResizeObserver(() => {
-        this.onViewportResize()
+        if (this.resizeRaf) cancelAnimationFrame(this.resizeRaf)
+        this.resizeRaf = requestAnimationFrame(() => {
+          this.resizeRaf = 0
+          this.onViewportResize()
+        })
       })
       this.resizeObs.observe(this.viewportEl)
     }
@@ -276,7 +281,7 @@ export class TimeStripController {
     if (this.mode === 'week') {
       const prevSegW = this.segW
       this.updateWeekMetrics()
-      if (Math.abs(this.segW - prevSegW) >= 2 || prevCompact !== patch.compact) {
+      if (Math.abs(this.segW - prevSegW) >= 8 || prevCompact !== patch.compact) {
         this.scroller.setSegmentSize(this.segW)
         this.repaintVisible()
       }
@@ -311,6 +316,8 @@ export class TimeStripController {
   }
 
   destroy(): void {
+    if (this.resizeRaf) cancelAnimationFrame(this.resizeRaf)
+    this.resizeRaf = 0
     this.resizeObs?.disconnect()
     this.resizeObs = null
     this.host?.removeEventListener('wheel', this.onWeekHostWheel, { capture: true })
@@ -351,7 +358,7 @@ export class TimeStripController {
     if (!this.viewportEl || !this.scroller || !this.ctx || this.mode !== 'week') return
     const prevSegW = this.segW
     this.updateWeekMetrics()
-    if (Math.abs(this.segW - prevSegW) < 2) return
+    if (Math.abs(this.segW - prevSegW) < 8) return
     this.scroller.setSegmentSize(this.segW)
     if (this.ctx.compact) {
       this.repaintVisible()

@@ -56,6 +56,21 @@ describe('EventStore', () => {
     expect(store.getById('x')?.title).toBe('X')
   })
 
+  it('reports the inclusive day span of stored events', () => {
+    const store = new EventStore()
+    expect(store.daySpan()).toBeNull()
+    store.setEvents([
+      { id: 1, title: 'A', start: '2026-08-10T10:00:00', end: '2026-08-10T11:00:00' },
+      { id: 2, title: 'B', start: '2026-08-20T10:00:00', end: '2026-08-21T09:00:00' }
+    ])
+    const span = store.daySpan()
+    expect(span).toBeTruthy()
+    expect(span!.min.getFullYear()).toBe(2026)
+    expect(span!.min.getMonth()).toBe(7)
+    expect(span!.min.getDate()).toBe(10)
+    expect(span!.max.getDate()).toBe(21)
+  })
+
   it('rebuilds index after timed → all-day update', () => {
     const store = new EventStore()
     store.setEvents([

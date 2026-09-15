@@ -163,6 +163,7 @@ declare class RollDateEvents {
     private bodyEl;
     private titleHost;
     private dateNavigator;
+    private viewCtx;
     private activeView;
     private views;
     private proUnlocked;
@@ -171,6 +172,7 @@ declare class RollDateEvents {
     private compact;
     private layoutObs;
     private layoutRaf;
+    private layoutLock;
     private readonly instanceId;
     constructor(selector: string | HTMLElement, options?: RollDateEventsOptions);
     /** Current view name */

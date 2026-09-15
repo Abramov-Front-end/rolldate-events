@@ -1,6 +1,6 @@
 {
   "name": "@rolldate/events",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": false,
   "description": "RollDate Events — high-performance JavaScript event calendar (free, MIT, zero runtime dependencies)",
   "type": "module",

@@ -6,8 +6,13 @@
 /** Narrow-container breakpoint (px) */
 export const COMPACT_BREAKPOINT = 640
 
-export function isCompactWidth(width: number): boolean {
-  return width > 0 && width <= COMPACT_BREAKPOINT
+/** Leave compact a bit wider than enter, so scrollbar/iframe jitter cannot oscillate. */
+export const COMPACT_EXIT_BREAKPOINT = 672
+
+export function isCompactWidth(width: number, currentlyCompact = false): boolean {
+  if (width <= 0) return currentlyCompact
+  if (currentlyCompact) return width <= COMPACT_EXIT_BREAKPOINT
+  return width <= COMPACT_BREAKPOINT
 }
 
 /** Month translate-strip buffer (week rows) — keep in sync with MonthView */

@@ -11,10 +11,12 @@ import {
 } from '../src/utils/responsive'
 
 describe('responsive utils', () => {
-  it('compact breakpoint at 640px', () => {
+  it('compact breakpoint at 640px with hysteresis to leave', () => {
     expect(isCompactWidth(640)).toBe(true)
     expect(isCompactWidth(641)).toBe(false)
     expect(isCompactWidth(320)).toBe(true)
+    expect(isCompactWidth(650, true)).toBe(true)
+    expect(isCompactWidth(673, true)).toBe(false)
     expect(COMPACT_BREAKPOINT).toBe(640)
   })
 

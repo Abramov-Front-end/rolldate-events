@@ -7,6 +7,8 @@ import {
   agendaSegHeight,
   agendaTopAnchorDayKey,
   agendaVisibleDayKeys,
+  nearestOccupiedDayKey,
+  occupiedDayKeys,
   sortAgendaDayEvents
 } from '../src/utils/agendaLayout'
 
@@ -51,6 +53,23 @@ describe('agendaLayout', () => {
     const list = Array.from({ length: 8 }, (_, i) => ev(i + 1, '2026-08-05T09:00:00'))
     byDay.set('2026-08-05', list)
     expect(agendaEventsForDay(byDay, '2026-08-05')).toHaveLength(8)
+  })
+
+  it('lists only days that have events, in date order', () => {
+    const byDay = new Map<string, NormalizedEvent[]>()
+    byDay.set('2026-09-17', [ev(2, '2026-09-17T09:00:00')])
+    byDay.set('2026-09-15', [ev(1, '2026-09-15T09:00:00'), ev(3, '2026-09-15T10:00:00')])
+    byDay.set('2026-09-16', [])
+    expect(occupiedDayKeys(byDay)).toEqual(['2026-09-15', '2026-09-17'])
+    expect(occupiedDayKeys(byDay, (key) => key !== '2026-09-15')).toEqual(['2026-09-17'])
+  })
+
+  it('jumps to the first occupied day on or after the target', () => {
+    const keys = ['2026-09-15', '2026-09-17', '2026-09-23']
+    expect(nearestOccupiedDayKey(keys, '2026-09-16')).toBe('2026-09-17')
+    expect(nearestOccupiedDayKey(keys, '2026-09-15')).toBe('2026-09-15')
+    expect(nearestOccupiedDayKey(keys, '2026-09-24')).toBe('2026-09-23')
+    expect(nearestOccupiedDayKey([], '2026-09-16')).toBeNull()
   })
 
   it('picks the day with the largest visible area in the viewport', () => {

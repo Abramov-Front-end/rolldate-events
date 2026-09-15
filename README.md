@@ -82,7 +82,7 @@ interface Event {
 | **Month** | Continuous vertical week strip; timed chips or compact dots when narrow |
 | **Week** | Horizontal week strip with timed grid and all-day band |
 | **Day** | Single-day timed grid with vertical day navigation |
-| **Agenda** | Native scroll list of full event rows grouped by date (no “+N more”) |
+| **Agenda** | Compact native-scroll list of events grouped by date (no “+N more”); days without events are skipped |
 
 All views use buffered `translate3d` strips or native scroll so navigation stays smooth with large datasets.
 

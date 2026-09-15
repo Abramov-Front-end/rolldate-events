@@ -202,6 +202,23 @@ export class EventStore {
     return this.byId.get(id)
   }
 
+  /**
+   * Inclusive calendar-day span of every cached event, or null when empty.
+   * Agenda uses this to load the event range, then paints only occupied days.
+   */
+  daySpan(): { min: Date; max: Date } | null {
+    if (!this.cached.length) return null
+    let min = Infinity
+    let max = -Infinity
+    for (const ev of this.cached) {
+      const a = startOfDay(ev.start).getTime()
+      const b = startOfDay(ev.end).getTime()
+      if (a < min) min = a
+      if (b > max) max = b
+    }
+    return { min: new Date(min), max: new Date(max) }
+  }
+
   forDay(day: Date): NormalizedEvent[] {
     if (this.dayIndexStale) {
       this.byDay = indexEventsByDay(this.memoResult)

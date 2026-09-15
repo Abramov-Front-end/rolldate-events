@@ -50,6 +50,7 @@ export class RollDateEvents {
   private bodyEl!: HTMLElement
   private titleHost: HTMLElement | null = null
   private dateNavigator: DateNavigator | null = null
+  private viewCtx: ViewContext | null = null
   private activeView: View | null = null
   private views: Record<CalendarViewName, View>
   private proUnlocked = false
@@ -58,6 +59,7 @@ export class RollDateEvents {
   private compact = false
   private layoutObs: ResizeObserver | null = null
   private layoutRaf = 0
+  private layoutLock = false
   private readonly instanceId = ++nextRollDateEventsInstanceId
 
   constructor(selector: string | HTMLElement, options: RollDateEventsOptions = {}) {
@@ -261,7 +263,9 @@ export class RollDateEvents {
   private emittedTo = -1
 
   private async refreshEvents(): Promise<void> {
-    const range = this.paddedRange(this.bufferedRange || this.visibleRange())
+    const range = this.paddedRange(
+      this.viewName === 'agenda' ? this.visibleRange() : this.bufferedRange || this.visibleRange()
+    )
     const expand = __PRO__ && this.proUnlocked
     const events = expand
       ? await this.store.prepareRange(range, true)
@@ -276,7 +280,7 @@ export class RollDateEvents {
   /** Prefetch beyond the mounted buffer so inserts already have events */
   private paddedRange(range: VisibleRange): VisibleRange {
     const pad =
-      this.viewName === 'month' ? 28 : this.viewName === 'week' ? 21 : this.viewName === 'agenda' ? 35 : 7
+      this.viewName === 'month' ? 28 : this.viewName === 'week' ? 21 : this.viewName === 'agenda' ? 1 : 7
     return { from: addDays(range.from, -pad), to: addDays(range.to, pad) }
   }
 
@@ -349,7 +353,19 @@ export class RollDateEvents {
       const from = startOfDay(this.cursor)
       return { from, to: addDays(from, 1) }
     }
-    return { from: startOfDay(this.cursor), to: addDays(this.cursor, 90) }
+    const span = this.store.daySpan()
+    const min = this.boundsMin()
+    const max = this.boundsMax()
+    if (!span) {
+      const from = startOfDay(this.cursor)
+      return { from, to: addDays(from, 1) }
+    }
+    let from = startOfDay(span.min)
+    let to = addDays(startOfDay(span.max), 1)
+    if (min && from < min) from = min
+    if (max && to > addDays(max, 1)) to = addDays(max, 1)
+    if (to <= from) to = addDays(from, 1)
+    return { from, to }
   }
 
   private resolveTheme(): 'light' | 'dark' {
@@ -439,9 +455,9 @@ export class RollDateEvents {
   }
 
   private measureLayout(): void {
-    const w = Math.round(this.root?.clientWidth || this.el.clientWidth || 0)
+    const w = Math.round(this.el.clientWidth || this.root?.clientWidth || 0)
     this.layoutWidth = w > 0 ? w : 800
-    this.compact = isCompactWidth(this.layoutWidth)
+    this.compact = isCompactWidth(this.layoutWidth, this.compact)
     if (this.root) {
       this.root.dataset.compact = this.compact ? 'true' : 'false'
     }
@@ -450,8 +466,10 @@ export class RollDateEvents {
   private startLayoutObserver(): void {
     if (typeof ResizeObserver === 'undefined') return
     this.layoutObs = new ResizeObserver((entries) => {
+      if (this.layoutLock) return
       const entry = entries[0]
-      const w = Math.round(entry?.contentRect.width ?? this.root.clientWidth)
+      const border = Array.isArray(entry.borderBoxSize) ? entry.borderBoxSize[0] : entry.borderBoxSize
+      const w = Math.round(border?.inlineSize ?? entry.contentRect.width ?? this.el.clientWidth)
       if (w <= 0) return
       if (this.layoutRaf) cancelAnimationFrame(this.layoutRaf)
       this.layoutRaf = requestAnimationFrame(() => {
@@ -459,23 +477,32 @@ export class RollDateEvents {
         this.onLayoutResize(w)
       })
     })
-    this.layoutObs.observe(this.root)
+    // Observe the host, not `.rde`: compact padding must not change the measured width.
+    this.layoutObs.observe(this.el)
   }
 
   private onLayoutResize(width: number): void {
-    const nextCompact = isCompactWidth(width)
-    const changed = width !== this.layoutWidth || nextCompact !== this.compact
+    const nextCompact = isCompactWidth(width, this.compact)
+    const compactChanged = nextCompact !== this.compact
+    const widthChanged = Math.abs(width - this.layoutWidth) >= 8
+    if (!compactChanged && !widthChanged) return
     this.layoutWidth = width
     this.compact = nextCompact
     this.root.dataset.compact = nextCompact ? 'true' : 'false'
-    if (!changed || !this.activeView) return
+    if (!this.activeView) return
+    this.layoutLock = true
     this.activeView.applyLayout?.({ compact: nextCompact, layoutWidth: width })
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        this.layoutLock = false
+      })
+    })
   }
 
   private buildViewContext(events: NormalizedEvent[]): ViewContext {
     const dayBounds = this.dayIndexBounds()
     const weekBounds = this.weekIndexBounds()
-    return {
+    const ctx: ViewContext = {
       root: this.bodyEl,
       cursor: this.cursor,
       locale: this.options.locale || 'en',
@@ -504,6 +531,7 @@ export class RollDateEvents {
         void this.onViewRangeChange(r)
       }
     }
+    return ctx
   }
 
   private async render(opts: { remount?: boolean } = {}): Promise<void> {
@@ -537,6 +565,7 @@ export class RollDateEvents {
     })
 
     const ctx = this.buildViewContext(events)
+    this.viewCtx = ctx
 
     if (remount) {
       if (this.activeView && this.activeView.name !== this.viewName) {

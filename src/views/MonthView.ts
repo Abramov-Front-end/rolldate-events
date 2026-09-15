@@ -95,7 +95,7 @@ export class MonthView implements View {
     this.ctx = { ...this.ctx, compact: patch.compact, layoutWidth: patch.layoutWidth }
     const newPx = this.weekRowPx()
     const oldPx = this.scroller.state.segmentSize
-    if (Math.abs(newPx - oldPx) >= 1) {
+    if (Math.abs(newPx - oldPx) >= 8) {
       this.scroller.setSegmentSize(newPx)
       this.stripEl.querySelectorAll<HTMLElement>('.rde-week-row').forEach((row) => {
         row.style.height = `${newPx}px`
@@ -169,7 +169,7 @@ export class MonthView implements View {
     this.stripEl.querySelectorAll<HTMLElement>('.rde-week-row').forEach((el) => {
       el.style.height = `${size}px`
     })
-    const sizeChanged = Math.abs(size - this.scroller.state.segmentSize) >= 1
+    const sizeChanged = Math.abs(size - this.scroller.state.segmentSize) >= 2
     if (sizeChanged) {
       this.scroller.setSegmentSize(size)
     }

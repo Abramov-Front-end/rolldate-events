@@ -18,13 +18,12 @@
   border-radius: 12px;
   padding: 12px;
   box-sizing: border-box;
-  container-type: inline-size;
   min-width: 0;
+  overflow-anchor: none;
 }
 
 .rde[data-compact='true'] {
   --rde-rail-w: 46px;
-  padding: 8px;
   border-radius: 10px;
 }
 
@@ -242,7 +241,7 @@
 /* Translate3d viewport (no native scrollbar) */
 .rde-viewport {
   position: relative;
-  height: min(640px, 70vh);
+  height: 640px;
   overflow: hidden;
   border: 1px solid var(--rde-border);
   border-radius: var(--rde-radius);
@@ -471,7 +470,7 @@
   border-radius: var(--rde-radius);
   overflow: hidden;
   background: var(--rde-surface);
-  height: min(680px, 75vh);
+  height: 680px;
 }
 
 .rde-tg-sticky {
@@ -833,18 +832,14 @@
   border-radius: 8px;
 }
 
-.rde[data-compact='true'] .rde-timegrid--infinite {
-  height: min(620px, 72vh);
-}
-
 .rde[data-compact='true'] .rde-allday__chip {
   font-size: 10px;
   padding: 2px 4px;
 }
 
-/* Agenda — native scroll, variable day height, full event list */
+/* Agenda — compact event list; empty days are omitted */
 .rde-agenda--scroll .rde-agenda-viewport {
-  height: min(640px, 70vh);
+  height: 640px;
   overflow-x: hidden;
   overflow-y: auto;
   touch-action: pan-y;
