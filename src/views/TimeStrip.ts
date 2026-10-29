@@ -1,11 +1,11 @@
 /**
  * Week/Day time strip.
- * Week — horizontal translate3d (wheel → X); day headers scroll with the grid.
+ * Week — translate3d on both axes: days on X, hours on Y (no native bars).
  * Day — vertical translate3d of day segments; sticky header.
  */
 
 import type { LayoutPatch, NormalizedEvent, ViewContext } from '../types'
-import { addDays, dayKey, formatTime, sameDay, startOfWeek } from '../utils/date'
+import { addDays, dayKey, eachDayKey, formatTime, parseDayKey, sameDay, startOfWeek } from '../utils/date'
 import { escapeAttr, escapeHtml } from '../utils/dom'
 import { eventsFingerprint, indexEventsByDay } from '../utils/eventIndex'
 import {
@@ -15,8 +15,26 @@ import {
   TranslateStrip,
   weekIndexToDate
 } from '../utils/infiniteScroll'
+import {
+  BoundPan,
+  bindPanKeys,
+  canPanY,
+  panChromeHtml,
+  routePanWheel,
+  syncPanHints
+} from '../utils/panScroll'
+import { eventEditableAttr, isEventEditable } from '../utils/eventEditable'
 import { maxOverlapColumns, weekLayoutMetrics } from '../utils/responsive'
-import { HOUR_PX, ALL_DAY_ROW_PX, layoutDayBlocks, allDayEventsForDay, renderAllDayHtml } from './timeGrid'
+import {
+  HOUR_PX,
+  ALL_DAY_ROW_PX,
+  TIMEGRID_MAX_PX,
+  layoutDayBlocks,
+  blockBoxStyle,
+  allDayEventsForDay,
+  renderAllDayHtml,
+  resizeHandlesHtml
+} from './timeGrid'
 
 export type StripMode = 'week' | 'day'
 
@@ -60,7 +78,12 @@ function headsHtml(
         day: 'numeric',
         ...(mode === 'day' ? { month: 'short' as const } : {})
       }).format(d)
-      return `<div class="rde-tg-head${sameDay(d, today) ? ' is-today' : ''}" data-day="${dayKey(d)}">${escapeHtml(label)}</div>`
+      const key = dayKey(d)
+      const cls = `rde-tg-head${sameDay(d, today) ? ' is-today' : ''}`
+      if (mode === 'week') {
+        return `<button type="button" class="${cls} rde-open-day" data-open-day="${key}" data-day="${key}">${escapeHtml(label)}</button>`
+      }
+      return `<div class="${cls}" data-day="${key}">${escapeHtml(label)}</div>`
     })
     .join('')
   return `<div class="rde-tg-heads" style="grid-template-columns:${cols}">${cells}</div>`
@@ -100,7 +123,8 @@ function blocksHtml(
           ? `<small>${escapeHtml(time)}${b.event.location ? ' · ' + escapeHtml(b.event.location) : ''}</small>`
           : ''
       const titleOnly = b.height < 22
-      return `<button type="button" class="rde-block${titleOnly ? ' rde-block--compact' : ''}" data-event-id="${escapeAttr(id)}" style="--rde-event-color:${escapeAttr(color)};top:${b.top}px;height:${b.height}px;left:calc(${left}% + 2px);width:calc(${width}% - 4px)" title="${escapeAttr(b.event.title)}"><span class="rde-block__title">${escapeHtml(b.event.title)}</span>${timeHtml}</button>`
+      const handles = isEventEditable(b.event, ctx.editable) ? resizeHandlesHtml('ns') : ''
+      return `<button type="button" class="rde-block${titleOnly ? ' rde-block--compact' : ''}" data-event-id="${escapeAttr(id)}" data-editable="${eventEditableAttr(b.event, ctx.editable)}" style="--rde-event-color:${escapeAttr(color)};top:${b.top}px;height:${b.height}px;left:calc(${left}% + 2px);width:calc(${width}% - 4px)" title="${escapeAttr(b.event.title)}"><span class="rde-block__title">${escapeHtml(b.event.title)}</span>${timeHtml}${handles}</button>`
     })
     .join('')
 }
@@ -128,6 +152,10 @@ export class TimeStripController {
   private resizeRaf = 0
   private eventsFp = ''
   private timeScrollEl: HTMLElement | null = null
+  private timeInnerEl: HTMLElement | null = null
+  private yPan: BoundPan | null = null
+  private unbindKeys: (() => void) | null = null
+  private previewKeys: string[] = []
 
   constructor(mode: StripMode) {
     this.mode = mode
@@ -149,7 +177,7 @@ export class TimeStripController {
 
     if (horizontal) {
       this.host.innerHTML = `
-        <div class="rde-timegrid rde-timegrid--infinite rde-timegrid--week rde-timegrid--x" style="--rde-week-seg-h:${this.segH}px">
+        <div class="rde-timegrid rde-timegrid--infinite rde-timegrid--week rde-timegrid--x rde-pan" tabindex="0" style="--rde-week-seg-h:${this.segH}px">
           <div class="rde-tg-main">
             <div class="rde-tg-week-top">
               <div class="rde-tg-corner-col">
@@ -161,7 +189,7 @@ export class TimeStripController {
               </div>
             </div>
             <div class="rde-tg-body-scroll" data-time-scroll>
-              <div class="rde-tg-week-scroll-inner" style="height:${this.segH}px">
+              <div class="rde-tg-week-scroll-inner" data-time-inner style="height:${this.segH}px">
                 <div class="rde-tg-week-grid">
                   <div class="rde-tg-rail-col">
                     ${hourLabelsHtml(ctx)}
@@ -173,6 +201,7 @@ export class TimeStripController {
               </div>
             </div>
           </div>
+          ${panChromeHtml(ctx.locale)}
         </div>
       `
     } else {
@@ -199,7 +228,20 @@ export class TimeStripController {
     this.viewportEl = this.host.querySelector('[data-viewport]') as HTMLElement
     if (horizontal) {
       this.timeScrollEl = this.host.querySelector('[data-time-scroll]')
+      this.timeInnerEl = this.host.querySelector('[data-time-inner]')
+      if (this.timeScrollEl && this.timeInnerEl) {
+        this.yPan = new BoundPan(this.timeScrollEl, this.timeInnerEl, () => this.refreshPanHints())
+      }
       this.host.addEventListener('wheel', this.onWeekHostWheel, { passive: false, capture: true })
+      const pane = this.host.querySelector<HTMLElement>('.rde-timegrid--week')
+      if (pane) {
+        this.unbindKeys = bindPanKeys(pane, {
+          canX: () => true,
+          canY: () => this.yPan?.canScroll() === true,
+          nudgeX: (delta) => this.scroller?.nudgeBy(delta),
+          nudgeY: (delta) => this.yPan?.nudge(delta)
+        })
+      }
     }
 
     this.updateWeekMetrics()
@@ -249,6 +291,9 @@ export class TimeStripController {
     this.activeIndex = center
     this.scroller.reset(center, { align: 'start' })
     this.scroller.start()
+    this.applyGridHeight()
+    this.yPan?.apply()
+    this.refreshPanHints()
 
     if (this.mode === 'day') {
       requestAnimationFrame(() => {
@@ -256,7 +301,10 @@ export class TimeStripController {
         this.syncDaySegmentHeight()
       })
     } else {
-      requestAnimationFrame(() => this.syncActiveHighlight())
+      requestAnimationFrame(() => {
+        this.applyGridHeight()
+        this.syncActiveHighlight()
+      })
     }
 
     if (horizontal && typeof ResizeObserver !== 'undefined') {
@@ -265,9 +313,12 @@ export class TimeStripController {
         this.resizeRaf = requestAnimationFrame(() => {
           this.resizeRaf = 0
           this.onViewportResize()
+          this.applyGridHeight()
         })
       })
       this.resizeObs.observe(this.viewportEl)
+      const weekTop = this.host.querySelector('.rde-tg-week-top')
+      if (weekTop) this.resizeObs.observe(weekTop)
     }
 
     this.host.addEventListener('click', this.onClick)
@@ -291,13 +342,12 @@ export class TimeStripController {
   }
 
   syncEvents(events: NormalizedEvent[]): void {
-    // Check first: scrolling inside a prefetched window re-delivers the same slice
     const fp = eventsFingerprint(events)
     if (fp === this.eventsFp) return
     this.eventsFp = fp
     this.events = events
     this.indexEvents(events)
-    this.fillEmptyDayBlocks()
+    this.refreshDayBlocks()
   }
 
   private indexEvents(events: NormalizedEvent[]): void {
@@ -315,14 +365,124 @@ export class TimeStripController {
     this.scroller.reset(idx, { align: 'start' })
   }
 
+  nudge(delta: number): void {
+    this.scroller?.nudgeBy(delta)
+  }
+
+  scrollTimeBand(delta: number): void {
+    this.yPan?.nudge(-delta)
+  }
+
+  previewTimedMove(
+    id: string,
+    start: Date,
+    end: Date,
+    originDay: Date,
+    _resourceId?: string
+  ): { top: number; height: number; leftPct: number; widthPct: number } | null {
+    if (!this.stripEl || !this.ctx) return null
+    const preview = this.events.map((ev) =>
+      String(ev.occurrenceId || ev.id) === id ? { ...ev, start, end } : ev
+    )
+    const byDay = indexEventsByDay(preview)
+    const keys = new Set<string>([
+      ...this.previewKeys,
+      ...eachDayKey(originDay, start),
+      ...eachDayKey(start, end)
+    ])
+    const ghostDay = dayKey(start)
+    let slot: { top: number; height: number; leftPct: number; widthPct: number } | null = null
+    for (const key of keys) {
+      this.stripEl.querySelectorAll<HTMLElement>(`.rde-tg-col[data-day="${key}"]`).forEach((col) => {
+        const found = this.paintLiveColumn(col, byDay, id, key === ghostDay)
+        if (key === ghostDay && found) slot = found
+      })
+    }
+    this.previewKeys = [...keys]
+    return slot
+  }
+
+  clearTimedPreview(): void {
+    if (!this.previewKeys.length) return
+    this.previewKeys = []
+    this.refreshDayBlocks()
+  }
+
+  private paintLiveColumn(
+    col: HTMLElement,
+    byDay: Map<string, NormalizedEvent[]>,
+    movingId: string,
+    hideMoving: boolean
+  ): { top: number; height: number; leftPct: number; widthPct: number } | null {
+    if (!this.ctx || !col.dataset.day) return null
+    const day = parseDayKey(col.dataset.day)
+    const { start, end } = this.ctx.visibleHours
+    const blocks = layoutDayBlocks(eventsOnDay(byDay, day), day, start, end)
+    const compact = this.ctx.compact
+    const maxCols = maxOverlapColumns(this.dayWidth, compact)
+    const byId = new Map<string, (typeof blocks)[number]>()
+    for (const b of blocks) {
+      let colI = b.col
+      let colCount = b.colCount
+      if (compact && colCount > maxCols) {
+        colCount = maxCols
+        colI = Math.min(colI, maxCols - 1)
+      }
+      byId.set(String(b.event.occurrenceId || b.event.id), { ...b, col: colI, colCount })
+    }
+
+    col.querySelectorAll('.rde-tg-slot, .rde-block--live').forEach((el) => el.remove())
+
+    col.querySelectorAll<HTMLElement>('.rde-block[data-event-id]').forEach((el) => {
+      const id = el.dataset.eventId || ''
+      if (id === movingId && hideMoving) {
+        el.style.opacity = '0'
+        el.style.pointerEvents = 'none'
+        return
+      }
+      const b = byId.get(id)
+      if (!b) {
+        el.style.opacity = '0'
+        return
+      }
+      const box = blockBoxStyle(b)
+      el.style.top = box.top
+      el.style.height = box.height
+      el.style.left = box.left
+      el.style.width = box.width
+      el.style.opacity = ''
+      el.style.pointerEvents = id === movingId ? 'none' : ''
+    })
+
+    const mine = byId.get(movingId)
+    if (!mine) return null
+    const widthPct = 100 / Math.max(1, mine.colCount)
+    const mark = document.createElement('div')
+    mark.className = 'rde-tg-slot'
+    mark.style.top = `${mine.top}px`
+    mark.style.height = `${mine.height}px`
+    mark.style.left = `calc(${mine.col * widthPct}% + 2px)`
+    mark.style.width = `calc(${widthPct}% - 4px)`
+    col.appendChild(mark)
+    return {
+      top: mine.top,
+      height: mine.height,
+      leftPct: mine.col * widthPct,
+      widthPct
+    }
+  }
+
   destroy(): void {
     if (this.resizeRaf) cancelAnimationFrame(this.resizeRaf)
     this.resizeRaf = 0
     this.resizeObs?.disconnect()
     this.resizeObs = null
     this.host?.removeEventListener('wheel', this.onWeekHostWheel, { capture: true })
+    this.unbindKeys?.()
+    this.unbindKeys = null
     this.scroller?.stop()
     this.scroller = null
+    this.yPan = null
     this.host?.removeEventListener('click', this.onClick)
     if (this.host) this.host.innerHTML = ''
     this.host = null
@@ -331,8 +491,10 @@ export class TimeStripController {
     this.headsStripEl = null
     this.viewportEl = null
     this.timeScrollEl = null
+    this.timeInnerEl = null
     this.ctx = null
     this.activeIndex = null
+    this.previewKeys = []
   }
 
   private calcDayWidth(): number {
@@ -341,6 +503,40 @@ export class TimeStripController {
       return Math.max(280, this.viewportEl.clientWidth || 800)
     }
     return weekLayoutMetrics(this.viewportEl.clientWidth, this.ctx.compact).dayWidth
+  }
+
+  private applyGridHeight(): void {
+    if (!this.host || !this.ctx) return
+    const grid = this.host.querySelector<HTMLElement>('.rde-timegrid')
+    if (!grid) return
+    const top = this.host.querySelector<HTMLElement>('.rde-tg-week-top, .rde-tg-sticky')
+    const headerH = top?.offsetHeight || HEAD_PX + (this.mode === 'week' ? this.allDayH : 0)
+    const bodyContent = this.hoursH + (this.mode === 'day' ? this.allDayH : 0)
+    const cs = getComputedStyle(grid)
+    const frame =
+      (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0)
+    const availableBody = TIMEGRID_MAX_PX - frame - headerH
+
+    if (this.mode === 'week' && this.timeScrollEl) {
+      const needsY = canPanY(this.hoursH, availableBody)
+      const bodyH = needsY ? Math.max(80, availableBody) : this.hoursH
+      grid.style.height = needsY ? `${TIMEGRID_MAX_PX}px` : ''
+      grid.style.maxHeight = `${TIMEGRID_MAX_PX}px`
+      this.timeScrollEl.style.height = `${bodyH}px`
+      this.timeScrollEl.style.flex = needsY ? '1 1 auto' : '0 0 auto'
+      this.yPan?.setContentSize(this.hoursH)
+      this.yPan?.setViewSize(bodyH)
+    } else {
+      const gridH = Math.min(TIMEGRID_MAX_PX, headerH + bodyContent + frame)
+      grid.style.height = `${gridH}px`
+      grid.style.maxHeight = `${TIMEGRID_MAX_PX}px`
+      if (this.viewportEl) {
+        this.viewportEl.style.height = `${Math.max(80, gridH - frame - HEAD_PX)}px`
+      }
+    }
+
+    this.yPan?.setOffset(this.yPan.offset)
+    this.refreshPanHints()
   }
 
   private updateWeekMetrics(): void {
@@ -397,7 +593,7 @@ export class TimeStripController {
     const cells = days
       .map((d) => {
         const evs = allDayEventsForDay(this.events, d)
-        return `<div class="rde-allday-col" data-day="${dayKey(d)}">${renderAllDayHtml(evs, this.ctx!.locale)}</div>`
+        return `<div class="rde-allday-col" data-day="${dayKey(d)}">${renderAllDayHtml(evs, this.ctx!.locale, this.ctx!.editable)}</div>`
       })
       .join('')
     return `<div class="rde-allday-row" style="height:${this.allDayH}px;grid-template-columns:${cols}">${cells}</div>`
@@ -524,10 +720,9 @@ export class TimeStripController {
     })
   }
 
-  private fillEmptyDayBlocks(): void {
+  private refreshDayBlocks(): void {
     if (!this.stripEl || !this.ctx) return
     this.stripEl.querySelectorAll<HTMLElement>('.rde-tg-col[data-day]').forEach((col) => {
-      if (col.childElementCount > 0) return
       const key = col.dataset.day
       if (!key) return
       const [y, m, d] = key.split('-').map(Number)
@@ -608,15 +803,27 @@ export class TimeStripController {
     }
   }
 
-  /** Wheel anywhere on week view → horizontal week navigation only */
+  private refreshPanHints(): void {
+    const pane = this.host?.querySelector<HTMLElement>('.rde-timegrid--week')
+    if (!pane) return
+    const y = this.yPan
+    syncPanHints(pane, {
+      canX: true,
+      canY: y?.canScroll() === true,
+      yAtStart: y?.atStart() !== false,
+      yAtEnd: y?.atEnd() !== false
+    })
+  }
+
   private onWeekHostWheel = (e: WheelEvent): void => {
     if (this.mode !== 'week' || !this.scroller) return
+    const route = routePanWheel(e, true, this.yPan?.canScroll() === true)
+    if (!route) return
     e.preventDefault()
     e.stopPropagation()
-    const fromTrackpadX = Math.abs(e.deltaX) > Math.abs(e.deltaY)
-    const raw = (fromTrackpadX ? e.deltaX : e.deltaY) * 0.9
-    const signed = fromTrackpadX ? -raw : raw
-    this.scroller.nudgeBy(signed)
+    if (route.axis === 'x') this.scroller.nudgeBy(route.delta)
+    else this.yPan?.nudge(route.delta)
+    this.refreshPanHints()
   }
 
   private onClick = (e: MouseEvent): void => {
@@ -629,6 +836,13 @@ export class TimeStripController {
         e.stopPropagation()
         this.ctx.onEventClick(ev, e)
       }
+      return
+    }
+    if (t.closest('[data-resize]')) return
+    const openEl = t.closest<HTMLElement>('[data-open-day]')
+    if (openEl?.dataset.openDay && this.mode === 'week') {
+      e.stopPropagation()
+      this.ctx.onDayOpen(parseDayKey(openEl.dataset.openDay))
       return
     }
     const dayEl = t.closest<HTMLElement>('[data-day]')

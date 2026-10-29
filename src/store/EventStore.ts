@@ -3,7 +3,8 @@
  * Events are normalized once on set/add — prepareRange only filters.
  */
 
-import type { Event, NormalizedEvent, VisibleRange } from '../types'
+import type { Event, EventMutation, NormalizedEvent, VisibleRange } from '../types'
+import { cloneEvent } from '../utils/eventChange'
 import { addDays, dayKey, endOfDay, startOfDay, toDate } from '../utils/date'
 import { indexEventsByDay } from '../utils/eventIndex'
 import { normalizeEvent } from '../utils/validate'
@@ -67,10 +68,45 @@ export class EventStore {
     return true
   }
 
+  /** Replace the stored event with an exact snapshot (used by revert). */
+  replace(id: string | number, event: Event): boolean {
+    const sid = String(id)
+    const idx = this.raw.findIndex((e) => String(e.id) === sid)
+    if (idx === -1) return false
+    this.raw[idx] = { ...event, id: this.raw[idx].id }
+    this.rebuildCache()
+    return true
+  }
+
   remove(id: string | number): boolean {
     const before = this.raw.length
     this.raw = this.raw.filter((e) => String(e.id) !== String(id))
     if (this.raw.length === before) return false
+    this.rebuildCache()
+    return true
+  }
+
+  /**
+   * Apply an isolated mutation list in one rebuild.
+   * Returns false without changing the store if any step cannot be applied.
+   */
+  applyMutations(mutations: EventMutation[]): boolean {
+    const next = this.raw.slice()
+    for (const mutation of mutations) {
+      if (mutation.type === 'update') {
+        const idx = next.findIndex((item) => String(item.id) === String(mutation.newEvent.id))
+        if (idx === -1) return false
+        next[idx] = { ...cloneEvent(mutation.newEvent), id: next[idx].id }
+      } else if (mutation.type === 'create') {
+        if (next.some((item) => String(item.id) === String(mutation.event.id))) return false
+        next.push(cloneEvent(mutation.event))
+      } else {
+        const idx = next.findIndex((item) => String(item.id) === String(mutation.event.id))
+        if (idx === -1) return false
+        next.splice(idx, 1)
+      }
+    }
+    this.raw = next
     this.rebuildCache()
     return true
   }

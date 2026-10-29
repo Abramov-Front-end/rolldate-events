@@ -7,12 +7,14 @@ import {
   addDays,
   dayKey,
   formatTime,
+  parseDayKey,
   primaryMonthForWeek,
   sameDay,
   startOfMonth,
   weekDays
 } from '../utils/date'
 import { escapeAttr, escapeHtml } from '../utils/dom'
+import { eventEditableAttr } from '../utils/eventEditable'
 import { eventsFingerprint, indexEventsByDay } from '../utils/eventIndex'
 import {
   dateToWeekIndex,
@@ -124,6 +126,8 @@ export class MonthView implements View {
 
     this.anchorYear = monthStart.getFullYear()
     this.anchorMonth = monthStart.getMonth()
+    // Keep view context in sync so delayed segment-size realign cannot snap back.
+    this.ctx = { ...this.ctx, cursor: monthStart }
 
     const from = weekIndexToDate(target - 4, fdow)
     const to = addDays(weekIndexToDate(target + 8, fdow), 6)
@@ -131,6 +135,10 @@ export class MonthView implements View {
 
     this.scroller.scrollToIndex(target, { animate: opts?.animate === true, align: 'start' })
     this.applyMonthHighlight()
+  }
+
+  nudgeStrip(delta: number): void {
+    this.scroller?.nudgeBy(delta)
   }
 
   destroy(): void {
@@ -154,7 +162,11 @@ export class MonthView implements View {
 
   private monthAnchorWeekIndex(): number {
     if (!this.ctx) return 0
-    return dateToWeekIndex(startOfMonth(this.ctx.cursor), this.ctx.firstDayOfWeek)
+    const monthStart =
+      this.anchorYear >= 0
+        ? new Date(this.anchorYear, this.anchorMonth, 1)
+        : startOfMonth(this.ctx.cursor)
+    return dateToWeekIndex(monthStart, this.ctx.firstDayOfWeek)
   }
 
   /** Keep translate3d segment size aligned with painted week-row height */
@@ -198,7 +210,7 @@ export class MonthView implements View {
       .map((ev) => {
         const color = ev.color || 'var(--rde-event-default)'
         const id = String(ev.occurrenceId || ev.id)
-        return `<button type="button" class="rde-event-dot" data-event-id="${escapeAttr(id)}" style="--rde-event-color:${escapeAttr(color)}" aria-label="${escapeAttr(ev.title)}" title="${escapeAttr(ev.title)}"></button>`
+        return `<button type="button" class="rde-event-dot" data-event-id="${escapeAttr(id)}" data-editable="${eventEditableAttr(ev, this.ctx!.editable)}" style="--rde-event-color:${escapeAttr(color)}" aria-label="${escapeAttr(ev.title)}" title="${escapeAttr(ev.title)}"></button>`
       })
       .join('')
     const moreHtml = more > 0 ? `<span class="rde-more-compact">+${more}</span>` : ''
@@ -219,7 +231,7 @@ export class MonthView implements View {
         const time = ev.allDay
           ? ''
           : `<span class="rde-event__time">${escapeHtml(formatTime(ev.start, locale))}</span>`
-        return `<button type="button" class="rde-event" data-event-id="${escapeAttr(id)}" style="--rde-event-color:${escapeAttr(color)}" title="${escapeAttr(ev.title)}">${time}<span class="rde-event__title">${escapeHtml(ev.title)}</span></button>`
+        return `<button type="button" class="rde-event" data-event-id="${escapeAttr(id)}" data-editable="${eventEditableAttr(ev, this.ctx!.editable)}" style="--rde-event-color:${escapeAttr(color)}" title="${escapeAttr(ev.title)}">${time}<span class="rde-event__title">${escapeHtml(ev.title)}</span></button>`
       })
       .join('')
     const moreHtml =
@@ -265,7 +277,7 @@ export class MonthView implements View {
         activeY >= 0 && cell.getFullYear() === activeY && cell.getMonth() === activeM
       const isToday = sameDay(cell, today)
       parts.push(
-        `<div class="rde-day${inActive ? ' rde-day--active-month' : ' rde-day--muted-month'}${isToday ? ' rde-day--today' : ''}${this.ctx?.isDateDisabled(cell) ? ' rde-day--disabled' : ''}" data-day="${key}"><div class="rde-day__num">${cell.getDate()}</div><div class="rde-day__events">${this.dayEventsHtml(key)}</div></div>`
+        `<div class="rde-day${inActive ? ' rde-day--active-month' : ' rde-day--muted-month'}${isToday ? ' rde-day--today' : ''}${this.ctx?.isDateDisabled(cell) ? ' rde-day--disabled' : ''}" data-day="${key}"><button type="button" class="rde-day__num rde-open-day" data-open-day="${key}" aria-label="Open day">${cell.getDate()}</button><div class="rde-day__events">${this.dayEventsHtml(key)}</div></div>`
       )
     }
     parts.push('</div>')
@@ -309,10 +321,12 @@ export class MonthView implements View {
     })
   }
 
-  private onSettle(abs: number): void {
+  private onSettle(_abs: number): void {
     if (!this.scroller || !this.ctx) return
     const fdow = this.ctx.firstDayOfWeek
-    const weekStart = weekIndexToDate(abs, fdow)
+    // Title follows the week pinned to the top — mid-viewport can still be the
+    // previous month when the selected month's 1st sits mid-row (Mar → Feb).
+    const weekStart = weekIndexToDate(this.scroller.topIndex(), fdow)
     const monthStart = primaryMonthForWeek(weekStart)
     const y = monthStart.getFullYear()
     const m = monthStart.getMonth()
@@ -320,6 +334,7 @@ export class MonthView implements View {
     if (monthChanged) {
       this.anchorYear = y
       this.anchorMonth = m
+      this.ctx = { ...this.ctx, cursor: monthStart }
       this.ctx.onAnchorChange(monthStart)
       this.applyMonthHighlight()
     }
@@ -352,6 +367,13 @@ export class MonthView implements View {
         e.stopPropagation()
         this.ctx.onEventClick(ev, e)
       }
+      return
+    }
+    if (t.closest('[data-resize]')) return
+    const openEl = t.closest<HTMLElement>('[data-open-day]')
+    if (openEl?.dataset.openDay) {
+      e.stopPropagation()
+      this.ctx.onDayOpen(parseDayKey(openEl.dataset.openDay))
       return
     }
     const moreBtn = t.closest<HTMLElement>('.rde-more')

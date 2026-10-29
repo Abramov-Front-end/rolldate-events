@@ -43,6 +43,13 @@ export function addDays(date: Date, days: number): Date {
   return d
 }
 
+/** Whole local calendar days from `b` to `a` (DST-safe). */
+export function diffCalendarDays(a: Date, b: Date): number {
+  const a0 = Date.UTC(a.getFullYear(), a.getMonth(), a.getDate())
+  const b0 = Date.UTC(b.getFullYear(), b.getMonth(), b.getDate())
+  return Math.round((a0 - b0) / 864e5)
+}
+
 export function addMonths(date: Date, months: number): Date {
   const d = new Date(date)
   d.setMonth(d.getMonth() + months)
@@ -68,6 +75,20 @@ export function dayKey(date: Date): string {
 export function parseDayKey(key: string): Date {
   const [y, m, d] = key.split('-').map(Number)
   return new Date(y, m - 1, d)
+}
+
+/** Inclusive local calendar-day keys from `from` to `to` (either order). */
+export function eachDayKey(from: Date, to: Date): string[] {
+  const a = startOfDay(from)
+  const b = startOfDay(to)
+  const start = a <= b ? a : b
+  const end = a <= b ? b : a
+  const keys: string[] = []
+  for (let d = start; d <= end; d = addDays(d, 1)) {
+    keys.push(dayKey(d))
+    if (keys.length > 370) break
+  }
+  return keys
 }
 
 /**
@@ -125,6 +146,27 @@ export function monthTitle(date: Date, locale: string): string {
   return new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(date)
 }
 
+/**
+ * Week header label. Single month → "March 2026"; cross-month → "Feb – Mar 2026"
+ * (avoids a mostly-February strip titled only March when the 1st sits on Sunday).
+ */
+export function weekTitle(weekStart: Date, locale: string): string {
+  const start = startOfDay(weekStart)
+  const end = addDays(start, 6)
+  const sameYear = start.getFullYear() === end.getFullYear()
+  const sameMonth = sameYear && start.getMonth() === end.getMonth()
+  if (sameMonth) return monthTitle(start, locale)
+
+  const short = (d: Date, withYear: boolean): string =>
+    new Intl.DateTimeFormat(locale, {
+      month: 'short',
+      ...(withYear ? { year: 'numeric' as const } : {})
+    }).format(d)
+
+  if (sameYear) return `${short(start, false)} – ${short(end, true)}`
+  return `${short(start, true)} – ${short(end, true)}`
+}
+
 export function formatTime(date: Date, locale: string): string {
   return new Intl.DateTimeFormat(locale, {
     hour: '2-digit',
@@ -141,5 +183,26 @@ export function isDayInRange(day: Date, min?: Date, max?: Date): boolean {
   const t = startOfDay(day).getTime()
   if (min && t < startOfDay(min).getTime()) return false
   if (max && t > startOfDay(max).getTime()) return false
+  return true
+}
+
+/** First instant after the inclusive `maxDate` calendar day (DST-safe). */
+export function exclusiveEndOfBoundDay(maxDate: Date): Date {
+  return addDays(startOfDay(maxDate), 1)
+}
+
+/**
+ * Whether event interval `[start, end)` lies inside the navigable window.
+ * `rangeStart = startOfDay(minDate)`, `rangeEndExclusive = exclusiveEndOfBoundDay(maxDate)`.
+ * Allowed iff `event.start >= rangeStart && event.end <= rangeEndExclusive`.
+ */
+export function isIntervalInBounds(
+  start: Date,
+  end: Date,
+  min?: Date,
+  max?: Date
+): boolean {
+  if (min && start.getTime() < startOfDay(min).getTime()) return false
+  if (max && end.getTime() > exclusiveEndOfBoundDay(max).getTime()) return false
   return true
 }

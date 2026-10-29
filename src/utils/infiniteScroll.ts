@@ -22,6 +22,8 @@ export interface TranslateStripHandlers {
   removeEnd?: (n: number) => void
   /** Resize segment size in place (week width) */
   onSegmentSize?: (size: number) => void
+  /** After transform is applied — keep sibling strips in sync */
+  onApply?: (transform: string, offset: number) => void
 }
 
 export interface TranslateStripOptions {
@@ -47,6 +49,8 @@ export interface TranslateStripOptions {
   maxIndex?: number
   /** Mirror translate3d on a sibling strip (week day headers) */
   syncTransformEl?: HTMLElement
+  /** Subtract from viewport size (Timeline resource column). */
+  viewInset?: number
 }
 
 function clampIndex(index: number, min?: number, max?: number): number {
@@ -71,6 +75,7 @@ export class TranslateStrip {
   private wheelInvert: boolean
   private wheelEnabled: boolean
   private syncTransformEl?: HTMLElement
+  private viewInset = 0
   private minIndex?: number
   private maxIndex?: number
   private handlers: TranslateStripHandlers
@@ -110,6 +115,7 @@ export class TranslateStrip {
     this.wheelInvert = opts.wheelInvert === true
     this.wheelEnabled = opts.wheelEnabled !== false
     this.syncTransformEl = opts.syncTransformEl
+    this.viewInset = Math.max(0, opts.viewInset ?? 0)
     this.minIndex = opts.minIndex
     this.maxIndex = opts.maxIndex
     this.handlers = handlers
@@ -139,6 +145,7 @@ export class TranslateStrip {
     const local = this.dominantIndex() - this.startIndex
     this.segmentSize = next
     this.offset = -(local * this.segmentSize)
+    this.clampOffset()
     this.apply()
     if (this.handlers.onSegmentSize) this.handlers.onSegmentSize(next)
     else this.handlers.paint(this.startIndex, this.count)
@@ -166,6 +173,7 @@ export class TranslateStrip {
       this.offset =
         -(local * this.segmentSize) + Math.min(view * 0.12, this.segmentSize * 0.25)
     }
+    this.clampOffset()
     this.handlers.paint(this.startIndex, this.count)
     this.apply()
     this.handlers.onRangeChange(this.startIndex, this.count)
@@ -188,8 +196,13 @@ export class TranslateStrip {
 
     const align = opts.align ?? 'start'
     const local = targetIndex - this.startIndex
+    const need = Math.ceil(this.viewSize() / this.segmentSize) + this.prefetch
 
-    if (local < 0 || local >= this.count) {
+    if (
+      local < 0 ||
+      local >= this.count ||
+      (align === 'start' && (this.count - local < need || local < this.prefetch))
+    ) {
       this.reset(targetIndex, { align })
       return
     }
@@ -199,6 +212,7 @@ export class TranslateStrip {
 
     if (!animate) {
       this.offset = targetOffset
+      this.clampOffset()
       this.apply()
       this.maybeExtend()
       this.handlers.onSettle(targetIndex)
@@ -213,6 +227,7 @@ export class TranslateStrip {
       const t = Math.min(1, (now - t0) / duration)
       const eased = 1 - (1 - t) ** 3
       this.offset = from + (targetOffset - from) * eased
+      this.clampOffset()
       this.apply()
       if (t < 1) {
         this.scrollAnimId = requestAnimationFrame(step)
@@ -262,6 +277,33 @@ export class TranslateStrip {
     this.maybeExtend()
   }
 
+  /** Test/helper: prepend segments on the leading edge without jumping. */
+  prepend(add: number): void {
+    const n = Math.max(1, Math.round(add))
+    if (this.minIndex != null && this.startIndex <= this.minIndex) return
+    this.startIndex -= n
+    this.count += n
+    this.offset -= n * this.segmentSize
+    if (this.canMutate()) this.handlers.insertStart!(this.startIndex, n)
+    else this.handlers.paint(this.startIndex, this.count)
+    this.clampOffset()
+    this.apply()
+    this.handlers.onRangeChange(this.startIndex, this.count)
+  }
+
+  /** Test/helper: append segments on the trailing edge. */
+  append(add: number): void {
+    const n = Math.max(1, Math.round(add))
+    if (this.maxIndex != null && this.startIndex + this.count - 1 >= this.maxIndex) return
+    const absStart = this.startIndex + this.count
+    this.count += n
+    if (this.canMutate()) this.handlers.insertEnd!(absStart, n)
+    else this.handlers.paint(this.startIndex, this.count)
+    this.clampOffset()
+    this.apply()
+    this.handlers.onRangeChange(this.startIndex, this.count)
+  }
+
   dominantIndex(): number {
     const view = this.viewSize()
     const mid = -this.offset + view / 2
@@ -269,10 +311,17 @@ export class TranslateStrip {
     return this.startIndex + Math.max(0, Math.min(this.count - 1, local))
   }
 
+  /** Absolute index of the segment pinned to the leading edge (month title / highlight). */
+  topIndex(): number {
+    const local = Math.floor((-this.offset + this.segmentSize * 0.12) / this.segmentSize)
+    return this.startIndex + Math.max(0, Math.min(this.count - 1, local))
+  }
+
   private viewSize(): number {
-    return this.axis === 'x'
-      ? this.viewport.clientWidth || this.segmentSize
-      : this.viewport.clientHeight || this.segmentSize
+    if (this.axis === 'x') {
+      return Math.max(1, (this.viewport.clientWidth || this.segmentSize) - this.viewInset)
+    }
+    return this.viewport.clientHeight || this.segmentSize
   }
 
   private offsetForIndex(absIndex: number, align: 'start' | 'center'): number {
@@ -303,6 +352,7 @@ export class TranslateStrip {
         : `translate3d(0, ${this.offset}px, 0)`
     this.strip.style.transform = t
     if (this.syncTransformEl) this.syncTransformEl.style.transform = t
+    this.handlers.onApply?.(t, this.offset)
   }
 
   private scheduleSettle(): void {
@@ -314,8 +364,32 @@ export class TranslateStrip {
     })
   }
 
+  private offsetBounds(): { min: number; max: number } {
+    const view = this.viewSize()
+    const content = this.count * this.segmentSize
+    let min = Math.min(0, view - content)
+    let max = 0
+    if (this.minIndex != null) {
+      const local = this.minIndex - this.startIndex
+      if (local > 0) max = Math.min(max, -local * this.segmentSize)
+    }
+    if (this.maxIndex != null) {
+      const local = this.maxIndex - this.startIndex
+      if (local >= 0) min = Math.max(min, -local * this.segmentSize)
+    }
+    if (min > max) min = max
+    return { min, max }
+  }
+
+  private clampOffset(): void {
+    const { min, max } = this.offsetBounds()
+    if (this.offset > max) this.offset = max
+    if (this.offset < min) this.offset = min
+  }
+
   private nudge(delta: number): void {
     this.offset += delta
+    this.clampOffset()
     this.apply()
     this.scheduleSettle()
   }
@@ -431,21 +505,29 @@ export class TranslateStrip {
 
   private maybeExtend(): void {
     if (this.extending) return
+    this.extending = true
+    let changed = false
+    for (let i = 0; i < 6; i++) {
+      if (!this.extendOnce()) break
+      changed = true
+    }
+    this.extending = false
+    if (changed) this.handlers.onRangeChange(this.startIndex, this.count)
+  }
+
+  private extendOnce(): boolean {
     const view = this.viewSize()
     const lead = -this.offset
     const trail = lead + view
-    // Use continuous positions — only react at true edges, not every peek into neighbor
     const localStart = lead / this.segmentSize
     const localEnd = trail / this.segmentSize
     const mutate = this.canMutate()
-    // Keep several segments of slack before trimming so mid-scroll never destroys DOM
     const softMax = this.bufferSize + Math.max(4, this.prefetch * 2)
-    const edge = 0.35 // extend only when <35% into the edge segment
+    const edge = 0.35
 
     if (localStart < edge) {
-      if (this.minIndex != null && this.startIndex <= this.minIndex) return
+      if (this.minIndex != null && this.startIndex <= this.minIndex) return false
       const add = Math.min(4, Math.max(2, Math.ceil(this.bufferSize / 3)))
-      this.extending = true
       this.startIndex -= add
       this.count += add
       this.offset -= add * this.segmentSize
@@ -456,16 +538,14 @@ export class TranslateStrip {
         if (mutate) this.handlers.removeEnd!(trim)
       }
       if (!mutate) this.handlers.paint(this.startIndex, this.count)
+      this.clampOffset()
       this.apply()
-      this.extending = false
-      this.handlers.onRangeChange(this.startIndex, this.count)
-      return
+      return true
     }
 
     if (localEnd > this.count - edge) {
-      if (this.maxIndex != null && this.startIndex + this.count - 1 >= this.maxIndex) return
+      if (this.maxIndex != null && this.startIndex + this.count - 1 >= this.maxIndex) return false
       const add = Math.min(4, Math.max(2, Math.ceil(this.bufferSize / 3)))
-      this.extending = true
       const absStart = this.startIndex + this.count
       this.count += add
       if (mutate) this.handlers.insertEnd!(absStart, add)
@@ -477,18 +557,22 @@ export class TranslateStrip {
         if (mutate) this.handlers.removeStart!(trim)
       }
       if (!mutate) this.handlers.paint(this.startIndex, this.count)
+      this.clampOffset()
       this.apply()
-      this.extending = false
-      this.handlers.onRangeChange(this.startIndex, this.count)
+      return true
     }
+
+    return false
   }
 }
 
-/** Week index relative to epoch week */
+/** Week index relative to epoch week (calendar-day math — DST-safe). */
 export function dateToWeekIndex(date: Date, firstDayOfWeek: 0 | 1): number {
   const ref = firstDayOfWeek === 1 ? new Date(1970, 0, 5) : new Date(1970, 0, 4)
   const start = startOfWeek(date, firstDayOfWeek)
-  return Math.round((start.getTime() - ref.getTime()) / 86400000 / 7)
+  const a0 = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate())
+  const b0 = Date.UTC(ref.getFullYear(), ref.getMonth(), ref.getDate())
+  return Math.round((a0 - b0) / 864e5 / 7)
 }
 
 export function weekIndexToDate(weekIndex: number, firstDayOfWeek: 0 | 1): Date {

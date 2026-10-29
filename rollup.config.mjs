@@ -33,7 +33,10 @@ function buildLite() {
     plugins: [
       replace({
         preventAssignment: true,
-        values: { __PRO__: JSON.stringify(false) }
+        values: {
+          __PRO__: JSON.stringify(false),
+          __PRO_SHOWCASE__: JSON.stringify(false)
+        }
       }),
       resolve({ browser: true }),
       postcss({
@@ -58,7 +61,10 @@ function buildLite() {
     plugins: [
       replace({
         preventAssignment: true,
-        values: { __PRO__: JSON.stringify(false) }
+        values: {
+          __PRO__: JSON.stringify(false),
+          __PRO_SHOWCASE__: JSON.stringify(false)
+        }
       }),
       dts()
     ],

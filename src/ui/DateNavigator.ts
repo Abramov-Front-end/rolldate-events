@@ -11,6 +11,9 @@ export interface DateNavigatorConfig {
   getCursor: () => Date
   getMinDate: () => Date | undefined
   getMaxDate: () => Date | undefined
+  getTitle?: (cursor: Date) => string
+  /** Months to mark current in the grid (week may span two). */
+  getActiveMonths?: () => Array<{ year: number; month: number }>
   onSelect: (year: number, month: number) => void
   onToday: () => void
 }
@@ -158,8 +161,9 @@ export class DateNavigator {
   /** Update trigger label from cursor date */
   syncTriggerLabel(): void {
     const cursor = this.cfg.getCursor()
-    this.trigger.textContent = `${monthTitle(cursor, this.cfg.locale)} ▾`
-    this.trigger.setAttribute('aria-label', `Current period: ${monthTitle(cursor, this.cfg.locale)}. Open date navigator`)
+    const label = this.cfg.getTitle?.(cursor) ?? monthTitle(cursor, this.cfg.locale)
+    this.trigger.textContent = `${label} ▾`
+    this.trigger.setAttribute('aria-label', `Current period: ${label}. Open date navigator`)
   }
 
   /** Refresh month grid when cursor or bounds change */
@@ -267,8 +271,9 @@ export class DateNavigator {
   private renderPanel(): void {
     this.yearEl.textContent = String(this.panelYear)
     const cursor = this.cfg.getCursor()
-    const curMonth = cursor.getMonth()
-    const curYear = cursor.getFullYear()
+    const activeMonths =
+      this.cfg.getActiveMonths?.() ??
+      [{ year: cursor.getFullYear(), month: cursor.getMonth() }]
 
     const prevBtn = this.popover.querySelector<HTMLButtonElement>('[data-action="prev-year"]')
     const nextBtn = this.popover.querySelector<HTMLButtonElement>('[data-action="next-year"]')
@@ -298,7 +303,8 @@ export class DateNavigator {
       const disabled = this.monthDisabled(this.panelYear, m)
       btn.disabled = disabled
       if (disabled) btn.setAttribute('aria-disabled', 'true')
-      if (this.panelYear === curYear && m === curMonth) {
+      const isCurrent = activeMonths.some((a) => a.year === this.panelYear && a.month === m)
+      if (isCurrent) {
         btn.classList.add('is-current')
         btn.setAttribute('aria-current', 'date')
       }

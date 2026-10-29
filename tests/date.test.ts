@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  addDays,
   clampDate,
+  exclusiveEndOfBoundDay,
   isDayInRange,
+  isIntervalInBounds,
   primaryMonthForWeek,
   startOfDay,
-  startOfWeek
+  startOfWeek,
+  weekTitle
 } from '../src/utils/date'
 import { dateToDayIndex, dateToWeekIndex, dayIndexToDate } from '../src/utils/infiniteScroll'
 
@@ -34,6 +38,60 @@ describe('date utils', () => {
     expect(high.getDate()).toBe(20)
   })
 
+  it('exclusiveEndOfBoundDay is the next local midnight, including DST', () => {
+    const max = startOfDay(new Date(2026, 2, 28))
+    const end = exclusiveEndOfBoundDay(max)
+    expect(end.getFullYear()).toBe(2026)
+    expect(end.getMonth()).toBe(2)
+    expect(end.getDate()).toBe(29)
+    expect(end.getHours()).toBe(0)
+    const across = exclusiveEndOfBoundDay(new Date(2026, 2, 29))
+    expect(across.getDate()).toBe(30)
+    expect(across.getHours()).toBe(0)
+  })
+
+  describe('isIntervalInBounds [start, end)', () => {
+    const min = new Date(2026, 8, 10)
+    const max = new Date(2026, 8, 20)
+    const rangeStart = startOfDay(min)
+    const rangeEndExclusive = exclusiveEndOfBoundDay(max)
+
+    it('allows start === rangeStart', () => {
+      expect(
+        isIntervalInBounds(rangeStart, new Date(2026, 8, 10, 1, 0), min, max)
+      ).toBe(true)
+    })
+
+    it('rejects start < rangeStart', () => {
+      expect(
+        isIntervalInBounds(new Date(2026, 8, 9, 23, 0), new Date(2026, 8, 10, 1, 0), min, max)
+      ).toBe(false)
+    })
+
+    it('allows end === rangeEndExclusive', () => {
+      expect(
+        isIntervalInBounds(new Date(2026, 8, 20, 22, 0), rangeEndExclusive, min, max)
+      ).toBe(true)
+    })
+
+    it('rejects end > rangeEndExclusive', () => {
+      expect(
+        isIntervalInBounds(new Date(2026, 8, 20, 22, 0), new Date(2026, 8, 21, 0, 1), min, max)
+      ).toBe(false)
+    })
+
+    it('rejects a multi-day [start, end) whose start is in range but end is past rangeEndExclusive', () => {
+      expect(
+        isIntervalInBounds(new Date(2026, 8, 19, 10, 0), new Date(2026, 8, 21, 0, 1), min, max)
+      ).toBe(false)
+    })
+
+    it('keeps navigation days inclusive through maxDate', () => {
+      expect(isDayInRange(new Date(2026, 8, 20), min, max)).toBe(true)
+      expect(isDayInRange(addDays(startOfDay(max), 1), min, max)).toBe(false)
+    })
+  })
+
   it('isDayInRange is inclusive', () => {
     const min = new Date(2026, 7, 10)
     const max = new Date(2026, 7, 20)
@@ -55,5 +113,16 @@ describe('date utils', () => {
     const weekStart = startOfWeek(new Date(2026, 1, 18), 1)
     const month = primaryMonthForWeek(weekStart)
     expect(month.getMonth()).toBe(1)
+  })
+
+  it('weekTitle spans short months when the week crosses a boundary', () => {
+    const cross = startOfWeek(new Date(2026, 2, 1), 1) // Feb 23 – Mar 1
+    const label = weekTitle(cross, 'en').toLowerCase()
+    expect(label).toMatch(/feb/)
+    expect(label).toMatch(/mar/)
+    expect(label).toMatch(/2026/)
+
+    const single = startOfWeek(new Date(2026, 5, 10), 1)
+    expect(weekTitle(single, 'en').toLowerCase()).toMatch(/june 2026/)
   })
 })

@@ -60,6 +60,7 @@ interface Event {
   description?: string
   resourceId?: string     // reserved — not used by views in v1
   recurring?: EventRecurring // reserved — base occurrence only in v1
+  allowedResourceIds?: string[] // Pro: destination allowlist; does not validate current resource
 }
 ```
 
@@ -74,6 +75,7 @@ interface Event {
 | `description` | Optional description (not shown in all views) |
 | `resourceId` | Reserved for future functionality — **not grouped** in v1 |
 | `recurring` | Reserved — **not expanded** in v1 |
+| `allowedResourceIds` | Pro: restricts resource *changes* (`undefined` = no limit, `[]` = no change). Intersects with calendar list. Does not validate or hide the current resource |
 
 ## Views
 
@@ -108,8 +110,12 @@ interface RollDateEventsOptions {
   header?: boolean                   // default: true (nav + date navigator + view tabs)
   visibleHours?: { start: number; end: number }  // week/day grid, default 9–18
   eventLimit?: number                // month chips before "+N more", default 3
-  minDate?: Date | string            // inclusive navigation bound
-  maxDate?: Date | string            // inclusive navigation bound
+  minDate?: Date | string            // rangeStart = 00:00 of this day
+  maxDate?: Date | string            // inclusive day; rangeEndExclusive = next midnight
+  // DnD: event interval [start, end); allowed iff
+  // event.start >= rangeStart && event.end <= rangeEndExclusive
+  allowedResourceIds?: string[]      // Pro: destination allowlist; intersects with event.allowedResourceIds
+  allowOverlap?: boolean             // default true; false blocks [start, end) overlaps on move/resize
   onEventClick?: (event: Event, nativeEvent: MouseEvent) => void
   onDateClick?: (date: Date, nativeEvent: MouseEvent) => void
   onViewChange?: (view: CalendarViewName) => void

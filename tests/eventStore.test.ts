@@ -24,6 +24,18 @@ describe('EventStore', () => {
 
     expect(store.remove(2)).toBe(true)
     expect(store.getRaw()).toHaveLength(1)
+
+    store.replace(1, {
+      id: 1,
+      title: 'A3',
+      start: '2026-08-20T11:00:00',
+      end: '2026-08-20T12:00:00',
+      resourceId: 'room'
+    })
+    expect(store.getRaw()[0]).toMatchObject({
+      title: 'A3',
+      resourceId: 'room'
+    })
   })
 
   it('indexes multi-day events on each day', () => {

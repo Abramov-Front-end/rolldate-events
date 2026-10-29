@@ -4,11 +4,14 @@
  */
 
 import type { NormalizedEvent, ViewContext } from '../types'
-import { addDays, dayKey, formatTime, startOfWeek } from '../utils/date'
+import { eventEditableAttr, isEventEditable } from '../utils/eventEditable'
+import { addDays, dayKey, eachDayKey, formatTime, parseDayKey, startOfWeek } from '../utils/date'
 import { escapeAttr, escapeHtml } from '../utils/dom'
 
 export const HOUR_PX = 48
 export const ALL_DAY_ROW_PX = 32
+/** Cap for Week / Day / Timeline — shrinks to hour content when smaller */
+export const TIMEGRID_MAX_PX = 680
 
 export interface LayoutBlock {
   event: NormalizedEvent
@@ -101,6 +104,100 @@ function layoutGroup(items: TimedItem[]): LayoutBlock[] {
   return placed
 }
 
+export function visibleSegment(
+  start: Date,
+  end: Date,
+  day: Date,
+  hourStart: number,
+  hourEnd: number
+): { start: Date; end: Date } | null {
+  const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hourStart, 0, 0, 0)
+  const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hourEnd, 0, 0, 0)
+  const s = start < dayStart ? dayStart : new Date(start)
+  const e = end > dayEnd ? dayEnd : new Date(end)
+  if (e <= s) return null
+  return { start: s, end: e }
+}
+
+export function eventSegments(
+  start: Date,
+  end: Date,
+  hourStart: number,
+  hourEnd: number
+): { start: Date; end: Date }[] {
+  const out: { start: Date; end: Date }[] = []
+  for (const key of eachDayKey(start, end)) {
+    const seg = visibleSegment(start, end, parseDayKey(key), hourStart, hourEnd)
+    if (seg) out.push(seg)
+  }
+  return out
+}
+
+/** Working time inside visible hours — overnight gap is not part of the duration. */
+export function visibleWorkMs(
+  start: Date,
+  end: Date,
+  hourStart: number,
+  hourEnd: number
+): number {
+  return eventSegments(start, end, hourStart, hourEnd).reduce(
+    (sum, seg) => sum + (seg.end.getTime() - seg.start.getTime()),
+    0
+  )
+}
+
+export function placeVisibleWork(
+  start: Date,
+  workMs: number,
+  hourStart: number,
+  hourEnd: number
+): { start: Date; end: Date } {
+  const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), hourStart, 0, 0, 0)
+  const dayEnd = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), hourEnd, 0, 0, 0)
+  let cursor = new Date(start)
+  if (cursor < dayStart(cursor)) cursor = dayStart(cursor)
+  while (cursor >= dayEnd(cursor)) cursor = addDays(dayStart(cursor), 1)
+  const begin = new Date(cursor)
+  let left = Math.max(0, workMs)
+  if (!left) return { start: begin, end: new Date(begin.getTime() + 15 * 6e4) }
+  while (left > 0) {
+    const avail = dayEnd(cursor).getTime() - cursor.getTime()
+    if (avail >= left) return { start: begin, end: new Date(cursor.getTime() + left) }
+    left -= Math.max(0, avail)
+    cursor = addDays(dayStart(cursor), 1)
+  }
+  return { start: begin, end: cursor }
+}
+
+/** Visible portion of a timed event inside one day's hour band. */
+export function clipTimedBox(
+  start: Date,
+  end: Date,
+  day: Date,
+  hourStart: number,
+  hourEnd: number
+): { top: number; height: number } | null {
+  const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hourStart, 0, 0, 0)
+  const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hourEnd, 0, 0, 0)
+  const s = start < dayStart ? dayStart : start
+  const e = end > dayEnd ? dayEnd : end
+  if (e <= s) return null
+  const top = (s.getHours() + s.getMinutes() / 60 - hourStart) * HOUR_PX
+  const height = Math.max(18, ((e.getTime() - s.getTime()) / 36e5) * HOUR_PX)
+  return { top, height }
+}
+
+export function blockBoxStyle(b: LayoutBlock): { top: string; height: string; left: string; width: string } {
+  const width = 100 / Math.max(1, b.colCount)
+  const left = b.col * width
+  return {
+    top: `${b.top}px`,
+    height: `${b.height}px`,
+    left: `calc(${left}% + 2px)`,
+    width: `calc(${width}% - 4px)`
+  }
+}
+
 export function allDayEventsForDay(events: NormalizedEvent[], day: Date): NormalizedEvent[] {
   const key = dayKey(day)
   return events.filter((e) => {
@@ -109,7 +206,11 @@ export function allDayEventsForDay(events: NormalizedEvent[], day: Date): Normal
   })
 }
 
-export function renderAllDayHtml(events: NormalizedEvent[], locale: string): string {
+export function renderAllDayHtml(
+  events: NormalizedEvent[],
+  locale: string,
+  calendarEditable = false
+): string {
   if (!events.length) {
     return '<div class="rde-allday rde-allday--empty"></div>'
   }
@@ -117,7 +218,7 @@ export function renderAllDayHtml(events: NormalizedEvent[], locale: string): str
     .map((ev) => {
       const id = String(ev.occurrenceId || ev.id)
       const color = ev.color || 'var(--rde-event-default)'
-      return `<button type="button" class="rde-allday__chip" data-event-id="${escapeAttr(id)}" style="--rde-event-color:${escapeAttr(color)}" title="${escapeAttr(ev.title)}">${escapeHtml(ev.title)}</button>`
+      return `<button type="button" class="rde-allday__chip" data-event-id="${escapeAttr(id)}" data-editable="${eventEditableAttr(ev, calendarEditable)}" style="--rde-event-color:${escapeAttr(color)}" title="${escapeAttr(ev.title)}">${escapeHtml(ev.title)}</button>`
     })
     .join('')
   return `<div class="rde-allday">${chips}</div>`
@@ -132,7 +233,18 @@ export function renderHourLabels(hourStart: number, hourEnd: number): string {
   return rows.join('')
 }
 
-export function renderBlocksHtml(blocks: LayoutBlock[], locale: string): string {
+export function resizeHandlesHtml(axis: 'ns' | 'ew'): string {
+  return (
+    `<span class="rde-resize rde-resize--${axis} rde-resize--start" data-resize="start" aria-hidden="true"></span>` +
+    `<span class="rde-resize rde-resize--${axis} rde-resize--end" data-resize="end" aria-hidden="true"></span>`
+  )
+}
+
+export function renderBlocksHtml(
+  blocks: LayoutBlock[],
+  locale: string,
+  calendarEditable = false
+): string {
   return blocks
     .map((b) => {
       const id = String(b.event.occurrenceId || b.event.id)
@@ -140,7 +252,8 @@ export function renderBlocksHtml(blocks: LayoutBlock[], locale: string): string 
       const width = 100 / b.colCount
       const left = b.col * width
       const time = formatTime(b.event.start, locale)
-      return `<button type="button" class="rde-block" data-event-id="${escapeAttr(id)}" style="--rde-event-color:${escapeAttr(color)};top:${b.top}px;height:${b.height}px;left:calc(${left}% + 2px);width:calc(${width}% - 4px)" title="${escapeAttr(b.event.title)}"><span class="rde-block__title">${escapeHtml(b.event.title)}</span><small>${escapeHtml(time)}${b.event.location ? ' · ' + escapeHtml(b.event.location) : ''}</small></button>`
+      const handles = isEventEditable(b.event, calendarEditable) ? resizeHandlesHtml('ns') : ''
+      return `<button type="button" class="rde-block" data-event-id="${escapeAttr(id)}" data-editable="${eventEditableAttr(b.event, calendarEditable)}" style="--rde-event-color:${escapeAttr(color)};top:${b.top}px;height:${b.height}px;left:calc(${left}% + 2px);width:calc(${width}% - 4px)" title="${escapeAttr(b.event.title)}"><span class="rde-block__title">${escapeHtml(b.event.title)}</span><small>${escapeHtml(time)}${b.event.location ? ' · ' + escapeHtml(b.event.location) : ''}</small>${handles}</button>`
     })
     .join('')
 }

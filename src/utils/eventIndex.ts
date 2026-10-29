@@ -41,14 +41,28 @@ export function indexEventsByDay(events: NormalizedEvent[]): Map<string, Normali
   return byDay
 }
 
+function mixStr(hash: number, value: string): number {
+  let next = hash
+  for (let i = 0; i < value.length; i++) next = Math.imul(next ^ value.charCodeAt(i), 16777619)
+  return next
+}
+
 /**
  * Cheap sampled signature of a prepared event slice.
  * Used to skip re-indexing / DOM refresh when the slice did not change.
+ * Includes presentation fields (title/color/allDay) so host `updateEvent` patches repaint.
  */
 export function eventsFingerprint(events: NormalizedEvent[]): string {
   if (!events.length) return '0'
-  const a = events[0]
-  const b = events[events.length - 1]
-  const m = events[events.length >> 1]
-  return `${events.length}:${String(a.id)}:${String(m.id)}:${String(b.id)}:${a.start.getTime()}:${b.end.getTime()}`
+  let hash = events.length
+  for (const ev of events) {
+    hash = Math.imul(hash ^ (ev.start.getTime() / 60000), 16777619)
+    hash = Math.imul(hash ^ (ev.end.getTime() / 60000), 16777619)
+    hash = Math.imul(hash ^ (ev.allDay ? 1 : 0), 16777619)
+    hash = mixStr(hash, String(ev.resourceId || ''))
+    hash = mixStr(hash, String(ev.occurrenceId || ev.id))
+    hash = mixStr(hash, String(ev.title || ''))
+    hash = mixStr(hash, String(ev.color || ''))
+  }
+  return `${events.length}:${hash}`
 }

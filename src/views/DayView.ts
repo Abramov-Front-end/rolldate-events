@@ -26,6 +26,18 @@ export class DayView implements View {
     this.strip.applyLayout(patch)
   }
 
+  nudgeStrip(delta: number): void {
+    this.strip.nudge(delta)
+  }
+
+  previewTimedMove(id: string, start: Date, end: Date, originDay: Date) {
+    return this.strip.previewTimedMove(id, start, end, originDay)
+  }
+
+  clearTimedPreview(): void {
+    this.strip.clearTimedPreview()
+  }
+
   destroy(): void {
     this.strip.destroy()
   }

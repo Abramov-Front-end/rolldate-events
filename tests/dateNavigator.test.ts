@@ -54,6 +54,35 @@ describe('Date navigator', () => {
     expect(cal.getDate().getMonth()).toBe(3)
   })
 
+  it('week view title spans both months when the week crosses a boundary', () => {
+    // Mar 1 2026 is Sunday → Mon-start week is Feb 23 – Mar 1
+    const cal = mount({ defaultDate: '2026-08-15', defaultView: 'week' })
+    const trigger = document.querySelector('.rde-date-nav-trigger') as HTMLButtonElement
+    trigger.click()
+    const march = [...document.querySelectorAll<HTMLButtonElement>('.rde-date-nav-month')].find(
+      (b) => b.textContent?.toLowerCase().startsWith('mar')
+    )
+    march!.click()
+    const label = trigger.textContent?.toLowerCase() || ''
+    expect(label).toMatch(/feb/)
+    expect(label).toMatch(/mar/)
+    trigger.click()
+    const current = [...document.querySelectorAll<HTMLButtonElement>('.rde-date-nav-month.is-current')]
+    expect(current.map((b) => b.dataset.month).sort()).toEqual(['1', '2'])
+  })
+
+  it('month view title stays on the month picked from the navigator', () => {
+    const cal = mount({ defaultDate: '2026-10-15', defaultView: 'month' })
+    const trigger = document.querySelector('.rde-date-nav-trigger') as HTMLButtonElement
+    trigger.click()
+    const march = [...document.querySelectorAll<HTMLButtonElement>('.rde-date-nav-month')].find(
+      (b) => b.textContent?.toLowerCase().startsWith('mar')
+    )
+    march!.click()
+    expect(cal.getDate().getMonth()).toBe(2)
+    expect(trigger.textContent?.toLowerCase()).toMatch(/mar/)
+  })
+
   it('setDate stays synchronized with navigator label', () => {
     const cal = mount({ defaultDate: '2026-08-15' })
     cal.setDate(new Date(2027, 11, 1))

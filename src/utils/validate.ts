@@ -5,6 +5,7 @@
 import type { Event, NormalizedEvent, RollDateEventsOptions } from '../types'
 import { clampHour, endOfDay, startOfDay, toDate } from './date'
 import { devWarn } from './devWarn'
+import { copyAllowedResourceIds } from './eventResource'
 
 declare const __PRO__: boolean
 
@@ -67,5 +68,21 @@ export function normalizeEvent(event: Event, seenIds?: Set<string>): NormalizedE
     seenIds.add(id)
   }
 
-  return { ...event, start, end }
+  const next: NormalizedEvent = { ...event, start, end }
+  if (event.allowedResourceIds) {
+    next.allowedResourceIds = copyAllowedResourceIds(event.allowedResourceIds)
+  }
+  if (event.recurring?.excludedOccurrenceIndexes) {
+    next.recurring = {
+      ...event.recurring,
+      excludedOccurrenceIndexes: event.recurring.excludedOccurrenceIndexes.slice()
+    }
+  }
+  if (event.recurringSource) {
+    next.recurringSource = {
+      seriesId: event.recurringSource.seriesId,
+      occurrenceIndex: event.recurringSource.occurrenceIndex
+    }
+  }
+  return next
 }

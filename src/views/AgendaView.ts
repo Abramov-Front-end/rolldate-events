@@ -6,6 +6,7 @@
 import type { LayoutPatch, NormalizedEvent, View, ViewContext } from '../types'
 import { addDays, dayKey, formatTime, parseDayKey, startOfDay } from '../utils/date'
 import { escapeAttr, escapeHtml } from '../utils/dom'
+import { eventEditableAttr } from '../utils/eventEditable'
 import {
   agendaEventsForDay,
   agendaTopAnchorDayKey,
@@ -131,7 +132,8 @@ export class AgendaView implements View {
       day: 'numeric',
       year: 'numeric'
     }).format(day)
-    return `<div class="rde-agenda__day-col"><div class="rde-agenda__date" role="heading" aria-level="3"><span class="rde-agenda__weekday">${escapeHtml(weekday)}</span><span class="rde-agenda__date-sep">, </span><span class="rde-agenda__ymd">${escapeHtml(ymd)}</span></div></div>`
+    const key = dayKey(day)
+    return `<div class="rde-agenda__day-col"><button type="button" class="rde-agenda__date rde-open-day" data-open-day="${key}" aria-label="Open day, ${escapeAttr(weekday)}, ${escapeAttr(ymd)}"><span class="rde-agenda__weekday">${escapeHtml(weekday)}</span><span class="rde-agenda__date-sep">, </span><span class="rde-agenda__ymd">${escapeHtml(ymd)}</span><span class="rde-open-day__hint">Open day</span></button></div>`
   }
 
   private eventRowHtml(ev: NormalizedEvent, locale: string): string {
@@ -143,7 +145,7 @@ export class AgendaView implements View {
     const loc = ev.location
       ? `<span class="rde-agenda__loc">${escapeHtml(ev.location)}</span>`
       : ''
-    return `<button type="button" class="rde-agenda__item" data-event-id="${escapeAttr(id)}" style="--rde-event-color:${escapeAttr(color)}" title="${escapeAttr(ev.title)}"><span class="rde-agenda__time${timeClass}">${escapeHtml(time)}</span><span class="rde-agenda__title">${escapeHtml(ev.title)}</span>${loc}</button>`
+    return `<button type="button" class="rde-agenda__item" data-event-id="${escapeAttr(id)}" data-editable="${eventEditableAttr(ev, this.ctx?.editable === true)}" style="--rde-event-color:${escapeAttr(color)}" title="${escapeAttr(ev.title)}"><span class="rde-agenda__time${timeClass}">${escapeHtml(time)}</span><span class="rde-agenda__title">${escapeHtml(ev.title)}</span>${loc}</button>`
   }
 
   private eventsBodyHtml(dayEvents: NormalizedEvent[], locale: string): string {
@@ -297,6 +299,13 @@ export class AgendaView implements View {
     if (eventBtn?.dataset.eventId) {
       const ev = this.ctx.getEvent(eventBtn.dataset.eventId)
       if (ev) this.ctx.onEventClick(ev, e)
+      return
+    }
+    if (t.closest('[data-resize]')) return
+    const openEl = t.closest<HTMLElement>('[data-open-day]')
+    if (openEl?.dataset.openDay) {
+      e.stopPropagation()
+      this.ctx.onDayOpen(parseDayKey(openEl.dataset.openDay))
       return
     }
     const dayEl = t.closest<HTMLElement>('[data-day]')
